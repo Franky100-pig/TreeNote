@@ -1,0 +1,48 @@
+:root {
+  --bg: #f7f5f0;
+  --ink: #3d3a34;
+  --muted: #8a8577;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: -apple-system, "PingFang SC", "Helvetica Neue", sans-serif;
+}
+
+#app {
+  width: 100%;
+  height: 100%;
+}
+
+.placeholder {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  text-align: center;
+}
+
+.placeholder h1 {
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+
+.placeholder p {
+  color: var(--muted);
+  font-size: 14px;
+}
