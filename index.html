@@ -8,11 +8,19 @@
 </head>
 <body>
   <div id="app">
-    <div class="placeholder">
-      <h1>cardwall</h1>
-      <p>脚手架就绪 —— 物理核心（C2）与画布渲染（C3）随后落地。</p>
+    <header id="toolbar">
+      <span class="brand">cardwall</span>
+      <span class="hint">力导向漂浮演示 · 交互（平移/缩放/拖拽）即将上线</span>
+    </header>
+    <div id="viewport">
+      <div id="world">
+        <svg id="edges"></svg>
+        <!-- cards injected by renderer/app.js -->
+      </div>
     </div>
   </div>
+  <script src="renderer/physics.js"></script>
+  <script src="renderer/sample.js"></script>
   <script src="renderer/app.js"></script>
 </body>
 </html>
