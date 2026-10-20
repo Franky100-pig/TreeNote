@@ -1,6 +1,7 @@
-const { app, BrowserWindow } = require('electron');
+const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 
 // --smoke: 开窗后等渲染完成即退出，用于 CI/脚手架自检
 const isSmoke = process.argv.includes('--smoke');
@@ -14,6 +15,79 @@ if (isSmoke) {
   app.commandLine.appendSwitch('disable-gpu');
   app.disableHardwareAcceleration();
 }
+
+// ---- vault (C6) -------------------------------------------------------------
+// One board file under the app's userData directory. CARDWALL_VAULT_DIR
+// overrides it; smoke runs in a fresh temp dir so runs stay hermetic.
+const VAULT_DIR = process.env.CARDWALL_VAULT_DIR
+  ? path.resolve(process.env.CARDWALL_VAULT_DIR)
+  : isSmoke
+    ? fs.mkdtempSync(path.join(os.tmpdir(), 'cardwall-smoke-'))
+    : path.join(app.getPath('userData'), 'vault');
+const BOARD_FILE = path.join(VAULT_DIR, 'board.json');
+const MAX_CARDS = 5000;
+const MAX_TITLE = 500;
+const MAX_NOTE = 20000;
+
+function readBoard() {
+  try {
+    const data = JSON.parse(fs.readFileSync(BOARD_FILE, 'utf8'));
+    if (!data || !Array.isArray(data.cards)) return null;
+    return data;
+  } catch (err) {
+    if (err.code !== 'ENOENT') console.error('[vault] read failed:', err.message);
+    return null;
+  }
+}
+
+// Untrusted input (the renderer is the only writer, but a hand-edited or
+// crafted board file must never crash or bloat the app).
+function sanitizeBoard(data) {
+  const raw = data && Array.isArray(data.cards) ? data.cards.slice(0, MAX_CARDS) : [];
+  const ids = new Set();
+  const cards = [];
+  for (const c of raw) {
+    if (!c || typeof c.id !== 'string' || !c.id || ids.has(c.id)) continue;
+    ids.add(c.id);
+    cards.push({
+      id: c.id,
+      title: String(c.title == null ? '' : c.title).slice(0, MAX_TITLE),
+      note: String(c.note == null ? '' : c.note).slice(0, MAX_NOTE),
+      x: Number.isFinite(c.x) ? c.x : 0,
+      y: Number.isFinite(c.y) ? c.y : 0,
+      parent: null
+    });
+  }
+  // Second pass: parents may be declared after their children.
+  const byId = new Map(cards.map(c => [c.id, c]));
+  raw.forEach((c, i) => {
+    if (!c || !byId.has(c.id)) return;
+    const parent = typeof c.parent === 'string' ? c.parent : null;
+    if (parent && parent !== c.id && byId.has(parent)) byId.get(c.id).parent = parent;
+  });
+  return { version: 1, cards };
+}
+
+// Write-then-rename: a crash mid-save leaves the previous board intact.
+function writeBoardAtomic(board) {
+  fs.mkdirSync(VAULT_DIR, { recursive: true });
+  const tmp = BOARD_FILE + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(board, null, 2), 'utf8');
+  try {
+    if (fs.existsSync(BOARD_FILE)) fs.copyFileSync(BOARD_FILE, BOARD_FILE + '.bak');
+  } catch (err) {
+    console.error('[vault] backup failed:', err.message);
+  }
+  fs.renameSync(tmp, BOARD_FILE);
+}
+
+ipcMain.handle('board:load', () => readBoard());
+ipcMain.handle('board:save', (event, data) => {
+  const clean = sanitizeBoard(data);
+  const board = { version: 1, savedAt: new Date().toISOString(), cards: clean.cards };
+  writeBoardAtomic(board);
+  return { ok: true, path: BOARD_FILE, cards: clean.cards.length };
+});
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -34,8 +108,18 @@ function createWindow() {
   win.loadFile('index.html');
 
   if (isSmoke) {
-    win.webContents.on('did-finish-load', async () => {
+    // `once`: the load-check reloads the window at the end.
+    win.webContents.once('did-finish-load', async () => {
       try {
+        // Boot is async now (it loads the board over IPC); wait for the
+        // renderer to signal readiness before running the checks.
+        let ready = false;
+        for (let i = 0; i < 150; i++) {
+          ready = await win.webContents.executeJavaScript('!!window.__cardwallReady');
+          if (ready) break;
+          await new Promise((r) => setTimeout(r, 20));
+        }
+        if (!ready) { console.error('[smoke] FAIL renderer never became ready'); app.exit(1); return; }
         // Deterministic renderer self-check (no rAF dependency): steps the
         // world, syncs the DOM, then verifies the render pipeline.
         const report = await win.webContents.executeJavaScript('window.__cardwallSelfCheck(120)');
@@ -64,6 +148,41 @@ function createWindow() {
         const okEditor = !!editor && editor.ok;
         console.log('[smoke] editor-check:', JSON.stringify(editor), okEditor ? 'PASS' : 'FAIL');
         if (!okEditor) { app.exit(1); return; }
+        // Vault round trip: save over IPC, then verify the file on disk.
+        const save = await win.webContents.executeJavaScript('window.__cardwallSaveNow()');
+        const onDisk = fs.existsSync(BOARD_FILE) ? JSON.parse(fs.readFileSync(BOARD_FILE, 'utf8')) : null;
+        const rootCard = onDisk && onDisk.cards.find((c) => c.title === '已编辑标题');
+        const persist = {
+          ok: !!save && save.ok && !!onDisk && onDisk.cards.length === 5 &&
+            !!rootCard && !fs.existsSync(BOARD_FILE + '.tmp'),
+          saved: save && save.cards,
+          diskCards: onDisk ? onDisk.cards.length : null,
+          editedTitlePersisted: !!rootCard,
+          tmpLeftOver: fs.existsSync(BOARD_FILE + '.tmp'),
+          path: BOARD_FILE
+        };
+        console.log('[smoke] persist-check:', JSON.stringify(persist), persist.ok ? 'PASS' : 'FAIL');
+        if (!persist.ok) { app.exit(1); return; }
+        // Load path: reload the window and confirm the board comes back from disk.
+        win.webContents.reload();
+        let ready2 = false;
+        for (let i = 0; i < 150; i++) {
+          try {
+            ready2 = await win.webContents.executeJavaScript('!!window.__cardwallReady');
+          } catch (err) {
+            ready2 = false; // still navigating
+          }
+          if (ready2) break;
+          await new Promise((r) => setTimeout(r, 20));
+        }
+        const loaded = ready2
+          ? await win.webContents.executeJavaScript(
+              '({ cards: window.__cardwall.world.cards.length, hasEdited: window.__cardwall.world.cards.some(function (c) { return c.title === "已编辑标题"; }) })'
+            )
+          : null;
+        const okLoad = !!loaded && loaded.cards === 5 && loaded.hasEdited;
+        console.log('[smoke] load-check:', JSON.stringify(loaded), okLoad ? 'PASS' : 'FAIL');
+        if (!okLoad) { app.exit(1); return; }
         app.exit(0);
       } catch (err) {
         console.error('[smoke] error:', err);

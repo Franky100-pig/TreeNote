@@ -1,6 +1,9 @@
-const { contextBridge } = require('electron');
+const { contextBridge, ipcRenderer } = require('electron');
 
-// C1 脚手架：先暴露平台信息；C6 再补 loadBoard / saveBoard / chooseVaultDir
+// Renderer <-> main bridge. The renderer never touches the filesystem; it
+// only asks the main process to load or save the board.
 contextBridge.exposeInMainWorld('cardwall', {
-  platform: process.platform
+  platform: process.platform,
+  loadBoard: () => ipcRenderer.invoke('board:load'),
+  saveBoard: (board) => ipcRenderer.invoke('board:save', board)
 });

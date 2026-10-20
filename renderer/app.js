@@ -21,16 +21,20 @@
   var cardEls = new Map(); // id -> HTMLElement
   var edgeEls = new Map(); // childId -> SVGPathElement
 
-  window.SAMPLE_TREE.forEach(function (item) {
-    CardPhysics.addCard(world, {
-      id: item.id,
-      x: item.x,
-      y: item.y,
-      parent: item.parent || null,
-      title: item.title,
-      note: item.note || ''
+  function seedCards(list) {
+    list.forEach(function (item) {
+      CardPhysics.addCard(world, {
+        id: item.id,
+        x: item.x,
+        y: item.y,
+        parent: item.parent || null,
+        title: item.title,
+        note: item.note || ''
+      });
     });
-  });
+  }
+
+  seedCards(window.SAMPLE_TREE); // first-run / no-bridge fallback
 
   // ---- DOM construction ----------------------------------------------------
   var zCounter = 100;
@@ -135,6 +139,56 @@
     updateEdges();
   }
 
+  // ---- persistence (C6) -------------------------------------------------------
+  // Every structural or content change marks the board dirty; the tick loop
+  // flushes after a short debounce. The main process owns the file and does
+  // the atomic write — the renderer never touches the filesystem.
+  var SAVE_DEBOUNCE_MS = 600;
+  var saveState = { dirty: false, lastChange: 0, inFlight: false, pending: null };
+
+  function hasBridge() {
+    return !!(window.cardwall && typeof window.cardwall.saveBoard === 'function');
+  }
+
+  function markDirty() {
+    saveState.dirty = true;
+    saveState.lastChange = performance.now();
+  }
+
+  function serialize() {
+    return {
+      version: 1,
+      cards: world.cards.map(function (c) {
+        return {
+          id: c.id,
+          title: c.title,
+          note: c.note,
+          x: c.x,
+          y: c.y,
+          parent: c.parent || null
+        };
+      })
+    };
+  }
+
+  function flushSave(force) {
+    if (!hasBridge() || saveState.inFlight || !saveState.dirty) return Promise.resolve(null);
+    if (!force && performance.now() - saveState.lastChange < SAVE_DEBOUNCE_MS) {
+      return Promise.resolve(null);
+    }
+    saveState.dirty = false;
+    saveState.inFlight = true;
+    saveState.pending = window.cardwall.saveBoard(serialize()).then(function (r) {
+      saveState.inFlight = false;
+      return r;
+    }, function (err) {
+      saveState.inFlight = false;
+      saveState.dirty = true; // retry on the next flush
+      return { ok: false, error: String(err) };
+    });
+    return saveState.pending;
+  }
+
   // ---- view transform --------------------------------------------------------
   // Pan/zoom plumbing; input handlers live in interaction.js. Zoom anchor math
   // (verified by fixed-point check): pan' = pan*r + anchor*(1 - r),
@@ -236,6 +290,7 @@
     }
     stepTween(dtS);
     syncDOM();
+    flushSave(false);
   }
 
   function frame(now) {
@@ -246,11 +301,29 @@
   }
 
   // ---- boot --------------------------------------------------------------------
-  buildDOM();
-  world.cards.forEach(measure);
-  applyFit(90);
-  syncDOM();
-  requestAnimationFrame(frame);
+  // Boot is async: the board is loaded over IPC. The sample tree is already in
+  // the world as a fallback and is replaced when a saved board arrives.
+  function boot(board) {
+    if (board && Array.isArray(board.cards) && board.cards.length) {
+      world.cards.length = 0;
+      seedCards(board.cards);
+    }
+    buildDOM();
+    world.cards.forEach(measure);
+    applyFit(90);
+    syncDOM();
+    requestAnimationFrame(frame);
+    window.__cardwallReady = true;
+  }
+
+  (function bootAsync() {
+    var bridge = window.cardwall;
+    if (!bridge || typeof bridge.loadBoard !== 'function') {
+      boot(null); // plain-browser fallback
+      return;
+    }
+    bridge.loadBoard().then(boot, function () { boot(null); });
+  })();
 
   // ---- card editing (C5): selection, inline edit, create, delete ------------
   var selectedId = null;
@@ -327,6 +400,7 @@
     parts.note.contentEditable = 'false';
     parts.el.classList.remove('editing');
     measure(card); // text reflow can change the card size -> edge endpoints
+    markDirty();
     syncDOM();
   }
 
@@ -360,6 +434,7 @@
     measure(card);
     raise(el);
     select(id);
+    markDirty();
     syncDOM();
     startEdit(card);
     return card;
@@ -382,6 +457,7 @@
     CardPhysics.removeCard(world, id);
     if (selectedId === id) selectedId = null;
     if (editingId === id) { editingId = null; worldPaused = false; }
+    markDirty();
     syncDOM();
   }
 
@@ -453,6 +529,12 @@
     }
   });
 
+  // Force a save and return its promise (smoke uses this for the disk check).
+  window.__cardwallSaveNow = function () {
+    markDirty();
+    return flushSave(true);
+  };
+
   // ---- self-check hook -----------------------------------------------------------
   // Deterministic (no rAF dependency) so `npm run smoke` can verify the
   // render pipeline in a headless window.
@@ -518,6 +600,7 @@
     applyView: applyView,
     syncDOM: syncDOM,
     onUserInteract: onUserInteract,
+    onCardPlaced: markDirty,
     raise: raise,
     findCard: function (id) { return CardPhysics.findCard(world, id); }
   });
@@ -560,14 +643,23 @@
     };
 
     // 3. card drag: grab the first card, move +80px, release with velocity
+    // Synthetic events land in the same task, so spin a few real milliseconds
+    // between them — the release velocity needs a measurable dt (>5ms).
+    function spin(ms) {
+      var t0 = performance.now();
+      while (performance.now() - t0 < ms) { /* busy wait: real clock time */ }
+    }
     var cardEl = document.querySelector('.card');
     var card = CardPhysics.findCard(world, cardEl.dataset.id);
     var rect = cardEl.getBoundingClientRect();
     var cx = rect.left + rect.width / 2, cy = rect.top + rect.height / 2;
     var start = { x: card.x, y: card.y };
     fire('pointerdown', cardEl, cx, cy);
+    spin(12);
     fire('pointermove', cardEl, cx + 40, cy);
+    spin(12);
     fire('pointermove', cardEl, cx + 80, cy);
+    spin(12);
     fire('pointerup', cardEl, cx + 80, cy);
     var drag = {
       ok: !card.dragging && card.x > start.x + 60 && card.vx > 0,

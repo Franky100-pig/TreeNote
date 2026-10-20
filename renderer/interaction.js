@@ -29,6 +29,7 @@
     var syncDOM = opts.syncDOM;
     var findCard = opts.findCard;
     var onUserInteract = opts.onUserInteract || function () {};
+    var onCardPlaced = opts.onCardPlaced || function () {};
     var raise = opts.raise || function () {};
 
     var cardDrag = null; // { card, el, samples: [{x, y, t}] }
@@ -95,6 +96,7 @@
         }
         card.dragging = false;
         cardDrag.el.classList.remove('dragging');
+        onCardPlaced(card); // the card's new position is worth persisting
         cardDrag = null;
       }
       if (panDrag) {
