@@ -297,6 +297,7 @@
     var elapsed = Math.min(now - last, 250);
     last = now;
     tick(elapsed);
+    if (debug) debug.update(now, elapsed);
     requestAnimationFrame(frame);
   }
 
@@ -590,6 +591,38 @@
       tweenStarted: tweenStarted,
       cancelled: cancelled,
       scale: view.scale
+    };
+  };
+
+  // ---- debug overlay (C7, F3) --------------------------------------------------
+  var debug = window.CardDebug ? window.CardDebug.init({
+    viewport: viewport,
+    world: world,
+    view: view,
+    edgesEl: edgesEl,
+    physics: CardPhysics,
+    isTweening: function () { return !!tween; },
+    isPaused: function () { return worldPaused; }
+  }) : null;
+
+  if (debug && window.__cardwall) window.__cardwall.debug = debug;
+
+  window.__cardwallDebugCheck = function () {
+    var panel = document.getElementById('debug-panel');
+    var layer = document.getElementById('debug-layer');
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'F3', bubbles: true }));
+    var on = debug.isOn();
+    debug.update(performance.now() + 100000, 16); // force a refresh (rAF may be idle)
+    var stats = (panel.textContent || '').length > 20 && layer.childNodes.length > 0;
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'F3', bubbles: true }));
+    var off = !debug.isOn() && !panel.classList.contains('visible');
+    return {
+      ok: on && stats && off,
+      on: on,
+      stats: stats,
+      off: off,
+      nodes: layer.childNodes.length,
+      text: (panel.textContent || '').slice(0, 80)
     };
   };
 

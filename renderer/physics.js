@@ -40,7 +40,10 @@
     snapStiffness: 6,      // snap-back spring stiffness (weaker than tree edges
                            // so the tree shape stays readable)
     ringBaseRadius: 180,   // root ring base radius
-    ringSpacing: 95,       // radius increment per extra sibling on the same ring
+    ringSpacing: 60,       // radius increment per extra sibling on the same ring
+                           // (C7: 95 -> 60 — with 4 children the anchors reached
+                           // 435px and the settled tree needed a 0.66 fit scale;
+                           // 60 keeps big families compact, fit scale ~0.8)
 
     driftImpulse: 25,      // Brownian impulse magnitude (px/s velocity delta)
     driftChance: 0.02,     // per-step probability of a drift impulse

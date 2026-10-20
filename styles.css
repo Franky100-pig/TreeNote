@@ -138,6 +138,49 @@ body {
   color: #b9b2a4;
 }
 
+/* ---- debug overlay (C7, F3) -------------------------------------------- */
+#debug-panel {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  min-width: 200px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.93);
+  border: 1px solid var(--card-border);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px var(--shadow);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--ink);
+  white-space: pre;
+  display: none;
+  z-index: 20;
+  pointer-events: none;
+}
+
+#debug-panel.visible {
+  display: block;
+}
+
+.dbg-anchor {
+  fill: none;
+  stroke: #c9a227;
+  stroke-width: 1.6;
+}
+
+.dbg-anchor-line {
+  stroke: #c9a227;
+  stroke-width: 1;
+  stroke-dasharray: 4 4;
+  opacity: 0.65;
+}
+
+.dbg-vel {
+  stroke: #3d7fb8;
+  stroke-width: 1.6;
+}
+
 .card-root {
   border-color: var(--root-border);
 }

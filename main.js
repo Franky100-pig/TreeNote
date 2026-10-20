@@ -134,6 +134,11 @@ function createWindow() {
         const okCamera = !!camera && camera.ok;
         console.log('[smoke] camera-check:', JSON.stringify(camera), okCamera ? 'PASS' : 'FAIL');
         if (!okCamera) { app.exit(1); return; }
+        // Debug overlay: F3 toggles the panel and world markers.
+        const dbg = await win.webContents.executeJavaScript('window.__cardwallDebugCheck()');
+        const okDbg = !!dbg && dbg.ok;
+        console.log('[smoke] debug-check:', JSON.stringify(dbg), okDbg ? 'PASS' : 'FAIL');
+        if (!okDbg) { app.exit(1); return; }
         // Screenshot the settled floating state for visual review (gitignored artifact).
         const img = await win.webContents.capturePage();
         fs.writeFileSync(path.join(__dirname, 'smoke.png'), img.toPNG());
