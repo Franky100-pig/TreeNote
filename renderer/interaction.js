@@ -30,6 +30,7 @@
     var findCard = opts.findCard;
     var onUserInteract = opts.onUserInteract || function () {};
     var onCardPlaced = opts.onCardPlaced || function () {};
+    var onCardDropped = opts.onCardDropped || function () {};
     var raise = opts.raise || function () {};
 
     var cardDrag = null; // { card, el, samples: [{x, y, t}] }
@@ -97,6 +98,9 @@
         card.dragging = false;
         cardDrag.el.classList.remove('dragging');
         onCardPlaced(card); // the card's new position is worth persisting
+        // Dropping a card's centre inside another card re-parents it.
+        var target = opts.cardAt ? opts.cardAt(card.x, card.y, card.id) : null;
+        if (target) onCardDropped(card, target);
         cardDrag = null;
       }
       if (panDrag) {

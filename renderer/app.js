@@ -418,6 +418,40 @@
     return best;
   }
 
+  // Card whose body contains a world point (last match = topmost paint order).
+  function cardAt(x, y, excludeId) {
+    var hit = null;
+    world.cards.forEach(function (c) {
+      if (c.id === excludeId) return;
+      var w = (c.domW || c.w) / 2, h = (c.domH || c.h) / 2;
+      if (Math.abs(x - c.x) <= w && Math.abs(y - c.y) <= h) hit = c.id;
+    });
+    return hit;
+  }
+
+  // Is `ancestorId` an ancestor of `id`? (guards re-parent cycles)
+  function isAncestor(ancestorId, id) {
+    var cur = CardPhysics.findCard(world, id);
+    var guard = 0;
+    while (cur && cur.parent && guard++ < 1000) {
+      if (cur.parent === ancestorId) return true;
+      cur = CardPhysics.findCard(world, cur.parent);
+    }
+    return false;
+  }
+
+  function reparent(card, targetId) {
+    if (!card || !targetId || targetId === card.id) return false;
+    if (isAncestor(card.id, targetId)) return false; // would close a cycle
+    card.parent = targetId;
+    addEdgePath(card);
+    var el = cardEls.get(card.id);
+    if (el) el.classList.remove('card-root');
+    markDirty();
+    syncDOM();
+    return true;
+  }
+
   function createCard(worldPoint, parentId) {
     var id = 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
     var parent = parentId && CardPhysics.findCard(world, parentId) ? parentId : null;
@@ -634,6 +668,8 @@
     syncDOM: syncDOM,
     onUserInteract: onUserInteract,
     onCardPlaced: markDirty,
+    onCardDropped: reparent,
+    cardAt: cardAt,
     raise: raise,
     findCard: function (id) { return CardPhysics.findCard(world, id); }
   });
@@ -801,13 +837,33 @@
     var reparented = CardPhysics.findCard(world, 'n5').parent === 'root' &&
       !cardEls.has('n4') && !edgeEls.has('n4') && edgeEls.has('n5');
 
+    // 6. dragging a card onto another card re-parents it
+    var n3el = cardEls.get('n3');
+    var n1el = cardEls.get('n1');
+    var c3 = cardCenter(n3el);
+    var c1 = cardCenter(n1el);
+    pointer(n3el, 'pointerdown', c3.x, c3.y);
+    pointer(n3el, 'pointermove', c1.x, c1.y);
+    pointer(n3el, 'pointerup', c1.x, c1.y);
+    var reparentByDrop = CardPhysics.findCard(world, 'n3').parent === 'n1';
+
+    // 7. dropping a card onto its own descendant is refused (no cycles)
+    var c3b = cardCenter(cardEls.get('n3'));
+    pointer(n1el, 'pointerdown', c1.x, c1.y);
+    pointer(n1el, 'pointermove', c3b.x, c3b.y);
+    pointer(n1el, 'pointerup', c3b.x, c3b.y);
+    var cycleBlocked = CardPhysics.findCard(world, 'n1').parent === 'root';
+
     return {
-      ok: editStarted && committed && created && deleted && reparented,
+      ok: editStarted && committed && created && deleted && reparented &&
+        reparentByDrop && cycleBlocked,
       editStarted: editStarted,
       committed: committed,
       created: created,
       deleted: deleted,
-      reparented: reparented
+      reparented: reparented,
+      reparentByDrop: reparentByDrop,
+      cycleBlocked: cycleBlocked
     };
   };
 })();
