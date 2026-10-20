@@ -5,10 +5,40 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "smoke": "electron . --smoke"
+    "smoke": "electron . --smoke",
+    "test": "node --test test/physics.test.mjs",
+    "dist": "electron-builder --mac dmg"
   },
   "license": "MIT",
   "devDependencies": {
-    "electron": "44.9.1"
+    "electron": "44.9.1",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "com.franky100.cardwall",
+    "productName": "cardwall",
+    "files": [
+      "main.js",
+      "preload.js",
+      "index.html",
+      "styles.css",
+      "renderer/**/*",
+      "package.json"
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": ["arm64"]
+        }
+      ],
+      "category": "public.app-category.productivity"
+    },
+    "dmg": {
+      "title": "cardwall"
+    }
   }
 }
