@@ -4,7 +4,9 @@ const fs = require('fs');
 const os = require('os');
 
 // --smoke: 开窗后等渲染完成即退出，用于 CI/脚手架自检
-const isSmoke = process.argv.includes('--smoke');
+// The packaged macOS binary rejects unknown CLI options, so the env var
+// works for both dev and packaged runs.
+const isSmoke = process.argv.includes('--smoke') || process.env.CARDWALL_SMOKE === '1';
 
 // Restricted environments (agent sandboxes, CI) block Chromium's OS-level
 // sandbox and GPU helpers — smoke mode runs sandbox-free and software
@@ -25,6 +27,11 @@ const VAULT_DIR = process.env.CARDWALL_VAULT_DIR
     ? fs.mkdtempSync(path.join(os.tmpdir(), 'cardwall-smoke-'))
     : path.join(app.getPath('userData'), 'vault');
 const BOARD_FILE = path.join(VAULT_DIR, 'board.json');
+// The packaged app's __dirname lives inside a read-only asar, so the smoke
+// screenshot goes to the temp dir there; in dev it lands next to main.js.
+const SMOKE_SHOT = app.isPackaged
+  ? path.join(os.tmpdir(), 'cardwall-smoke.png')
+  : path.join(__dirname, 'smoke.png');
 const MAX_CARDS = 5000;
 const MAX_TITLE = 500;
 const MAX_NOTE = 20000;
@@ -141,8 +148,8 @@ function createWindow() {
         if (!okDbg) { app.exit(1); return; }
         // Screenshot the settled floating state for visual review (gitignored artifact).
         const img = await win.webContents.capturePage();
-        fs.writeFileSync(path.join(__dirname, 'smoke.png'), img.toPNG());
-        console.log('[smoke] screenshot -> smoke.png');
+        fs.writeFileSync(SMOKE_SHOT, img.toPNG());
+        console.log('[smoke] screenshot ->', SMOKE_SHOT);
         // Synthetic pointer/wheel events against the real interaction listeners.
         const interaction = await win.webContents.executeJavaScript('window.__cardwallInteractionCheck()');
         const okInteraction = !!interaction && interaction.ok;
