@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import physics from '../renderer/physics.js';
 
-const { createWorld, addCard, step, totalEnergy, computeAnchors, CONFIG } = physics;
+const { createWorld, addCard, step, totalEnergy, computeAnchors } = physics;
 
 function makeWorld(opts) {
   const w = createWorld({ seed: 42, ...opts });
