@@ -1,19 +1,24 @@
 /**
- * cardwall 物理核心 —— 力导向漂浮积分器
+ * cardwall physics core — force-directed floating integrator
  *
- * 纯逻辑、零依赖：UMD 包装，Node（单测）与浏览器（renderer）双端可用。
+ * Pure logic, zero dependencies: UMD-wrapped so the same module runs in
+ * Node (unit tests) and the browser (renderer).
  *
- * 每帧受力：
- *   1. 成对排斥（O(n^2)，带 cutoff）
- *   2. 父子弹簧（树边，rest length ~150px）
- *   3. 回弹锚点（父卡当前位置 + 子序号极坐标 ring 位；根卡绕世界原点 ring）
- *   4. 布朗微漂移（seeded 随机脉冲，幅度可调）
- *   5. 阻尼
- * 积分：固定步长半隐式欧拉；拖拽中的卡片由外部直接设位置并记录速度，
- * 松手后惯性自然接管、回锚弹簧拉回。
+ * Per-step forces:
+ *   1. Pairwise repulsion (O(n^2), with cutoff)
+ *   2. Parent-child spring (tree edges, rest length ~150px)
+ *   3. Snap-back ring anchor (children orbit the parent's live position;
+ *      roots orbit the world origin). Reaction forces are applied to the
+ *      parent card so the force field stays conservative.
+ *   4. Seeded Brownian drift (reproducible impulses)
+ *   5. Velocity damping
+ * Integration: fixed-step semi-implicit Euler; cards being dragged are
+ * positioned externally and their velocity is recorded by the caller, so
+ * inertia carries them on release and the snap spring pulls them home.
  *
- * 对标依据（Obsidian Canvas RE）：Obsidian 无释放惯性/无物理，
- * 本模块是 cardwall 的核心差异点；视口/吸附等其余参数见 RE 报告 config 表。
+ * Reference (Obsidian Canvas RE): Obsidian has no release inertia and no
+ * physics at all — this module is cardwall's core differentiator.
+ * See the RE report for viewport/snap config defaults.
  */
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) module.exports = factory();
@@ -22,25 +27,26 @@
   'use strict';
 
   var CONFIG = {
-    dt: 1 / 60,            // 固定步长（秒）
-    damping: 0.975,        // 每步速度阻尼（λ≈1.5/s，偏「漂浮」手感）
-    maxSpeed: 3000,        // 速度上限（px/s）
+    dt: 1 / 60,            // fixed step (seconds)
+    damping: 0.975,        // per-step velocity damping (lambda ~1.5/s, "floaty" feel)
+    maxSpeed: 3000,        // velocity cap (px/s)
 
-    repulsion: 150000,     // 排斥强度：a = repulsion / d（px/s²）
-    repulsionCutoff: 800,  // 排斥 cutoff（px）
+    repulsion: 150000,     // repulsion strength: a = repulsion / d (px/s^2)
+    repulsionCutoff: 800,  // repulsion cutoff (px)
 
-    springRestLength: 150, // 父子弹簧自然长度（px）
-    springStiffness: 10,   // 父子弹簧刚度（ω≈3.2 rad/s）
+    springRestLength: 150, // parent-child spring rest length (px)
+    springStiffness: 10,   // tree-edge stiffness (omega ~3.2 rad/s)
 
-    snapStiffness: 6,      // 回锚弹簧刚度（弱于树边，树形更清晰）
-    ringBaseRadius: 180,   // 根卡 ring 基础半径
-    ringSpacing: 95,       // 每多一个同层卡片的半径增量
+    snapStiffness: 6,      // snap-back spring stiffness (weaker than tree edges
+                           // so the tree shape stays readable)
+    ringBaseRadius: 180,   // root ring base radius
+    ringSpacing: 95,       // radius increment per extra sibling on the same ring
 
-    driftImpulse: 25,      // 布朗脉冲幅度（px/s 速度增量）
-    driftChance: 0.02,     // 每步触发脉冲的概率
+    driftImpulse: 25,      // Brownian impulse magnitude (px/s velocity delta)
+    driftChance: 0.02,     // per-step probability of a drift impulse
 
-    cardWidth: 250,        // 默认卡宽（对标 Obsidian 文本卡）
-    cardHeight: 60         // 默认卡高
+    cardWidth: 250,        // default card width (matches Obsidian text cards)
+    cardHeight: 60         // default card height
   };
 
   function mulberry32(seed) {
@@ -90,11 +96,14 @@
   }
 
   /**
-   * 回锚 ring：根卡绕世界原点（固定）；子卡绕父卡当前位置（锚点 = 父位 + 固定偏移）。
-   * 每步重算（父卡被拖动时子卡锚点跟随，树不撕裂）。
-   * anchors 表存绝对坐标；parentId 非空表示该锚点刚性挂在父卡上，
-   * 回锚力必须把等大反向的反作用力加回父卡，否则力场非保守、能量被持续泵入
-   * （实测表现为永动振荡）。
+   * Ring anchors: root cards orbit the world origin (fixed); child cards
+   * orbit their parent's live position (anchor = parent pos + fixed offset).
+   * Recomputed every step so the tree never tears when a parent is dragged.
+   * The anchors map stores absolute coordinates; a non-null parentId means
+   * the anchor is rigidly attached to the parent card, so the snap force
+   * must apply an equal-and-opposite reaction to the parent. Without the
+   * reaction the field is non-conservative and energy gets pumped in
+   * forever (observed as perpetual oscillation).
    */
   function computeAnchors(world) {
     var cfg = world.config;
@@ -110,7 +119,7 @@
     });
 
     world.cards.forEach(function (c) {
-      if (c.parent && findCard(world, c.parent)) return; // 子卡在下面按父卡处理
+      if (c.parent && findCard(world, c.parent)) return; // children handled below, per parent
       var idx = roots.indexOf(c);
       var r = cfg.ringBaseRadius + cfg.ringSpacing * Math.max(0, roots.length - 1);
       var theta = (idx / Math.max(1, roots.length)) * Math.PI * 2 + 0.3;
@@ -119,7 +128,9 @@
 
     kidsByParent.forEach(function (kids, pid) {
       var p = findCard(world, pid);
-      // 子卡 ring 半径 = 弹簧自然长度 + 同胞增量：单子卡时与树边完全同长，回锚与树边不互斗
+      // Child ring radius = spring rest length + sibling increment: with a
+      // single child the ring matches the tree edge exactly, so snap and
+      // spring never fight each other.
       var r = cfg.springRestLength + cfg.ringSpacing * Math.max(0, kids.length - 1);
       kids.forEach(function (k, i) {
         var theta = (i / kids.length) * Math.PI * 2 + 0.3;
@@ -141,10 +152,10 @@
 
     computeAnchors(world);
 
-    // 1. 清零受力
+    // 1. zero forces
     for (var i = 0; i < n; i++) { cards[i].fx = 0; cards[i].fy = 0; }
 
-    // 2. 成对排斥
+    // 2. pairwise repulsion
     var cutoff2 = cfg.repulsionCutoff * cfg.repulsionCutoff;
     for (var a = 0; a < n; a++) {
       for (var b = a + 1; b < n; b++) {
@@ -160,7 +171,8 @@
       }
     }
 
-    // 3. 回锚弹簧（子卡锚点挂在父卡上，反作用力回传父卡）+ 父子弹簧
+    // 3. snap springs (child anchors ride the parent; reaction applied to
+    //    the parent card) + parent-child springs
     for (var c = 0; c < n; c++) {
       var card = cards[c];
       var anchor = world.anchors.get(card.id);
@@ -187,7 +199,7 @@
       }
     }
 
-    // 4. 布朗微漂移（seeded，保证可复现）
+    // 4. seeded Brownian drift (reproducible)
     if (world.drift) {
       for (var g = 0; g < n; g++) {
         if (world.rng() < cfg.driftChance) {
@@ -197,7 +209,7 @@
       }
     }
 
-    // 5. 半隐式欧拉积分（拖拽中的卡片位置由外部控制）
+    // 5. semi-implicit Euler integration (dragged cards are positioned externally)
     for (var k = 0; k < n; k++) {
       var q = cards[k];
       if (q.dragging) continue;
@@ -213,9 +225,15 @@
     }
   }
 
-  /** 总机械能（KE + 弹簧 PE + 排斥 PE + 回锚 PE），用于「阻尼使能耗散」类不变量测试。
-   *  排斥力 a = repulsion/d（向外）对应 PE = −repulsion·ln(d)；超过 cutoff 无力，取 ln(cutoff) 常值。
-   *  注意：锚点是位置的函数（子卡锚随父卡），求值前必须重算，否则用旧锚点对当前位置求值会失真。 */
+  /**
+   * Total mechanical energy (KE + spring PE + repulsion PE + snap PE), used
+   * by "damping dissipates energy" invariant tests.
+   *   Repulsion a = repulsion/d (outward) corresponds to PE = -repulsion*ln(d);
+   *   beyond the cutoff there is no force, so PE takes the constant ln(cutoff).
+   *   Note: anchors are a function of position (child anchors ride the parent),
+   *   so they must be recomputed before evaluation — evaluating stale anchors
+   *   against live positions would distort the total.
+   */
   function totalEnergy(world) {
     var cfg = world.config;
     computeAnchors(world);
