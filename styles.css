@@ -115,6 +115,29 @@ body {
   box-shadow: 0 4px 8px rgba(61, 58, 52, 0.10), 0 12px 28px var(--shadow);
 }
 
+.card.selected {
+  border-color: #c9b98a;
+  box-shadow: 0 0 0 2px rgba(201, 185, 138, 0.30), 0 4px 12px var(--shadow);
+}
+
+.card.editing {
+  border-color: #b9a97a;
+  box-shadow: 0 0 0 2px rgba(185, 169, 122, 0.45), 0 4px 12px var(--shadow);
+  cursor: text;
+}
+
+.card.editing .card-title,
+.card.editing .card-note {
+  outline: none;
+  cursor: text;
+}
+
+.card.editing .card-title:empty::before,
+.card.editing .card-note:empty::before {
+  content: attr(data-placeholder);
+  color: #b9b2a4;
+}
+
 .card-root {
   border-color: var(--root-border);
 }
@@ -124,6 +147,8 @@ body {
   font-weight: 600;
   color: var(--ink);
   line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .card-note {
@@ -131,4 +156,6 @@ body {
   color: var(--muted);
   margin-top: 4px;
   line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-word;
 }

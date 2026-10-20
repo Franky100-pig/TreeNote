@@ -29,7 +29,7 @@
     var syncDOM = opts.syncDOM;
     var findCard = opts.findCard;
     var onUserInteract = opts.onUserInteract || function () {};
-    var zCounter = 100;
+    var raise = opts.raise || function () {};
 
     var cardDrag = null; // { card, el, samples: [{x, y, t}] }
     var panDrag = null;  // { startX, startY, viewX, viewY }
@@ -44,13 +44,15 @@
 
     viewport.addEventListener('pointerdown', function (e) {
       if (e.button !== 0) return; // primary button only (C4)
+      // Cards in edit mode own their pointer: text selection, not dragging.
+      if (e.target.closest && e.target.closest('.card.editing')) return;
       onUserInteract(); // user takes over the camera
       try { viewport.setPointerCapture(e.pointerId); } catch (err) { /* synthetic pointer */ }
       var cardEl = e.target.closest ? e.target.closest('.card') : null;
       if (cardEl) {
         var card = findCard(cardEl.dataset.id);
         if (!card) return;
-        cardEl.style.zIndex = ++zCounter; // raise to top of paint order
+        raise(cardEl); // raise to top of paint order
         cardEl.classList.add('dragging');
         card.dragging = true;
         var w = screenToWorld(e.clientX, e.clientY);

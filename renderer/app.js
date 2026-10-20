@@ -33,32 +33,58 @@
   });
 
   // ---- DOM construction ----------------------------------------------------
+  var zCounter = 100;
+
+  function buildCardEl(card) {
+    var el = document.createElement('div');
+    el.className = 'card' + (card.parent ? '' : ' card-root');
+    el.dataset.id = card.id;
+    var title = document.createElement('div');
+    title.className = 'card-title';
+    title.textContent = card.title;
+    title.dataset.placeholder = '标题';
+    var note = document.createElement('div');
+    note.className = 'card-note';
+    note.textContent = card.note;
+    note.dataset.placeholder = '补充说明（可留空）';
+    el.appendChild(title);
+    el.appendChild(note);
+    cardEls.set(card.id, el);
+    return el;
+  }
+
+  function addEdgePath(card) {
+    if (!card.parent || edgeEls.has(card.id)) return;
+    var path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('class', 'edge');
+    edgesEl.appendChild(path);
+    edgeEls.set(card.id, path);
+  }
+
+  function removeEdgePath(id) {
+    var path = edgeEls.get(id);
+    if (path) { path.remove(); edgeEls.delete(id); }
+  }
+
+  function raise(el) {
+    if (el) el.style.zIndex = ++zCounter;
+  }
+
+  function measure(card) {
+    var el = cardEls.get(card.id);
+    if (!el) return;
+    card.domW = el.offsetWidth;
+    card.domH = el.offsetHeight;
+  }
+
   function buildDOM() {
     var frag = document.createDocumentFragment();
     world.cards.forEach(function (card) {
-      var el = document.createElement('div');
-      el.className = 'card' + (card.parent ? '' : ' card-root');
-      el.dataset.id = card.id;
-      var title = document.createElement('div');
-      title.className = 'card-title';
-      title.textContent = card.title;
-      var note = document.createElement('div');
-      note.className = 'card-note';
-      note.textContent = card.note;
-      el.appendChild(title);
-      el.appendChild(note);
-      frag.appendChild(el);
-      cardEls.set(card.id, el);
+      frag.appendChild(buildCardEl(card));
     });
     // One SVG path per tree edge; the SVG layer precedes the cards in DOM
     // order, so card bodies paint over the line ends.
-    world.cards.forEach(function (card) {
-      if (!card.parent) return;
-      var path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-      path.setAttribute('class', 'edge');
-      edgesEl.appendChild(path);
-      edgeEls.set(card.id, path);
-    });
+    world.cards.forEach(addEdgePath);
     worldEl.appendChild(frag);
   }
 
@@ -184,24 +210,29 @@
   var last = performance.now();
   var SETTLE_AT = 4;         // seconds of simulated physics time before re-framing
   var SETTLE_INFLATE = 0.18; // bbox inflation: the tree is still expanding at SETTLE_AT
+  var worldPaused = false;   // true while a card is being edited
 
   // One frame of work, extracted so headless smoke can drive it synchronously
   // (requestAnimationFrame does not reliably tick in a hidden window).
   function tick(dtMs) {
     var dtS = dtMs / 1000;
-    acc += dtMs;
-    var steps = 0;
-    while (acc >= STEP_MS && steps < 5) {
-      CardPhysics.step(world);
-      acc -= STEP_MS;
-      steps++;
-    }
-    if (steps >= 5) acc = 0;
-    // The boot fit used the compact initial layout; once physics has
-    // organized the tree, gently re-frame it toward the settled bbox.
-    if (!settleFitDone && !userInteracted && world.time > SETTLE_AT) {
-      settleFitDone = true;
-      tweenTo(computeFitTarget(120, SETTLE_INFLATE));
+    if (!worldPaused) {
+      acc += dtMs;
+      var steps = 0;
+      while (acc >= STEP_MS && steps < 5) {
+        CardPhysics.step(world);
+        acc -= STEP_MS;
+        steps++;
+      }
+      if (steps >= 5) acc = 0;
+      // The boot fit used the compact initial layout; once physics has
+      // organized the tree, gently re-frame it toward the settled bbox.
+      if (!settleFitDone && !userInteracted && world.time > SETTLE_AT) {
+        settleFitDone = true;
+        tweenTo(computeFitTarget(120, SETTLE_INFLATE));
+      }
+    } else {
+      acc = 0; // no backlog while paused
     }
     stepTween(dtS);
     syncDOM();
@@ -216,14 +247,211 @@
 
   // ---- boot --------------------------------------------------------------------
   buildDOM();
-  world.cards.forEach(function (c) {
-    // Measure real rendered sizes once; edge endpoints use them.
-    c.domW = cardEls.get(c.id).offsetWidth;
-    c.domH = cardEls.get(c.id).offsetHeight;
-  });
+  world.cards.forEach(measure);
   applyFit(90);
   syncDOM();
   requestAnimationFrame(frame);
+
+  // ---- card editing (C5): selection, inline edit, create, delete ------------
+  var selectedId = null;
+  var editingId = null;
+
+  function select(id) {
+    if (selectedId && cardEls.get(selectedId)) {
+      cardEls.get(selectedId).classList.remove('selected');
+    }
+    selectedId = id || null;
+    var el = selectedId && cardEls.get(selectedId);
+    if (el) el.classList.add('selected');
+  }
+
+  function editorEls(id) {
+    var el = cardEls.get(id);
+    if (!el) return null;
+    return {
+      el: el,
+      title: el.querySelector('.card-title'),
+      note: el.querySelector('.card-note')
+    };
+  }
+
+  function caretToEnd(elm) {
+    var range = document.createRange();
+    range.selectNodeContents(elm);
+    range.collapse(false);
+    var sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
+
+  // Editing pauses the world: with Brownian drift running, the text would
+  // slide under the caret. Pause/resume is the whole focus-mode contract.
+  function startEdit(card) {
+    if (!card || editingId === card.id) return;
+    if (editingId) commitEdit();
+    var parts = editorEls(card.id);
+    if (!parts) return;
+    editingId = card.id;
+    worldPaused = true;
+    parts.el.classList.add('editing');
+    parts.title.contentEditable = 'plaintext-only';
+    parts.note.contentEditable = 'plaintext-only';
+    parts.title.focus();
+    caretToEnd(parts.title);
+  }
+
+  function cancelEdit() {
+    if (!editingId) return;
+    var card = CardPhysics.findCard(world, editingId);
+    var parts = editorEls(editingId);
+    if (card && parts) {
+      parts.title.textContent = card.title;
+      parts.note.textContent = card.note;
+    }
+    commitEdit();
+  }
+
+  function commitEdit() {
+    if (!editingId) return;
+    var id = editingId;
+    var card = CardPhysics.findCard(world, id);
+    var parts = editorEls(id);
+    editingId = null;
+    worldPaused = false;
+    if (!card || !parts) return;
+    card.title = (parts.title.textContent || '').trim() || '未命名';
+    card.note = (parts.note.textContent || '').trim();
+    parts.title.textContent = card.title;
+    parts.note.textContent = card.note;
+    parts.title.contentEditable = 'false';
+    parts.note.contentEditable = 'false';
+    parts.el.classList.remove('editing');
+    measure(card); // text reflow can change the card size -> edge endpoints
+    syncDOM();
+  }
+
+  // Nearest card within `maxDist` of a world point — the parent picker for
+  // cards created on empty canvas ("grow the tree where you click").
+  function nearestCardId(p, maxDist) {
+    var best = null;
+    var bestD = maxDist * maxDist;
+    world.cards.forEach(function (c) {
+      var dx = c.x - p.x, dy = c.y - p.y;
+      var d2 = dx * dx + dy * dy;
+      if (d2 < bestD) { bestD = d2; best = c.id; }
+    });
+    return best;
+  }
+
+  function createCard(worldPoint, parentId) {
+    var id = 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    var parent = parentId && CardPhysics.findCard(world, parentId) ? parentId : null;
+    var card = CardPhysics.addCard(world, {
+      id: id,
+      x: worldPoint.x,
+      y: worldPoint.y,
+      parent: parent,
+      title: '',
+      note: ''
+    });
+    var el = buildCardEl(card);
+    worldEl.appendChild(el);
+    addEdgePath(card);
+    measure(card);
+    raise(el);
+    select(id);
+    syncDOM();
+    startEdit(card);
+    return card;
+  }
+
+  function deleteCard(id) {
+    var card = CardPhysics.findCard(world, id);
+    if (!card) return;
+    // Re-parent children to the deleted card's parent so the tree stays
+    // connected instead of silently losing a whole subtree.
+    world.cards.forEach(function (c) {
+      if (c.parent !== id) return;
+      c.parent = card.parent || null;
+      if (c.parent) addEdgePath(c); else removeEdgePath(c.id);
+    });
+    var el = cardEls.get(id);
+    if (el) el.remove();
+    cardEls.delete(id);
+    removeEdgePath(id);
+    CardPhysics.removeCard(world, id);
+    if (selectedId === id) selectedId = null;
+    if (editingId === id) { editingId = null; worldPaused = false; }
+    syncDOM();
+  }
+
+  // Selection on pointerdown; committing an open editor when clicking away.
+  viewport.addEventListener('pointerdown', function (e) {
+    var cardEl = e.target.closest ? e.target.closest('.card') : null;
+    if (editingId && (!cardEl || cardEl.dataset.id !== editingId)) commitEdit();
+    select(cardEl ? cardEl.dataset.id : null);
+  });
+
+  // Double-click a card to edit it; double-click empty canvas to add a card
+  // (child of the selection, if any).
+  viewport.addEventListener('dblclick', function (e) {
+    var cardEl = e.target.closest ? e.target.closest('.card') : null;
+    if (cardEl) {
+      var card = CardPhysics.findCard(world, cardEl.dataset.id);
+      if (!card) return;
+      raise(cardEl);
+      startEdit(card);
+      return;
+    }
+    var rect = viewport.getBoundingClientRect();
+    var p = {
+      x: (e.clientX - rect.left - view.x) / view.scale,
+      y: (e.clientY - rect.top - view.y) / view.scale
+    };
+    createCard(p, nearestCardId(p, 320));
+  });
+
+  viewport.addEventListener('keydown', function (e) {
+    if (!editingId) return;
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      cancelEdit();
+    } else if (e.key === 'Enter' && e.target.classList && e.target.classList.contains('card-title')) {
+      e.preventDefault();
+      commitEdit();
+    }
+  });
+
+  viewport.addEventListener('input', function () {
+    if (!editingId) return;
+    var card = CardPhysics.findCard(world, editingId);
+    if (card) { measure(card); syncDOM(); }
+  });
+
+  // Commit when focus leaves the edited card entirely (title <-> note moves
+  // must not commit, so check the card containment on the next tick).
+  viewport.addEventListener('focusout', function () {
+    if (!editingId) return;
+    setTimeout(function () {
+      if (!editingId) return;
+      var el = cardEls.get(editingId);
+      if (el && document.activeElement && el.contains(document.activeElement)) return;
+      commitEdit();
+    }, 0);
+  });
+
+  window.addEventListener('keydown', function (e) {
+    // The editor (viewport handler) already consumed this key; without this
+    // guard an Escape that closes the editor would also clear the selection.
+    if (e.defaultPrevented) return;
+    if (editingId) return; // the editor owns the keyboard
+    if ((e.key === 'Delete' || e.key === 'Backspace') && selectedId) {
+      e.preventDefault();
+      deleteCard(selectedId);
+    } else if (e.key === 'Escape' && selectedId) {
+      select(null);
+    }
+  });
 
   // ---- self-check hook -----------------------------------------------------------
   // Deterministic (no rAF dependency) so `npm run smoke` can verify the
@@ -290,6 +518,7 @@
     applyView: applyView,
     syncDOM: syncDOM,
     onUserInteract: onUserInteract,
+    raise: raise,
     findCard: function (id) { return CardPhysics.findCard(world, id); }
   });
 
@@ -353,5 +582,107 @@
     var clamp = { ok: maxScale <= 2.5 + 1e-9 && minScale >= 0.2 - 1e-9, maxScale: maxScale, minScale: minScale };
 
     return { pan: pan, zoom: zoom, drag: drag, clamp: clamp, ok: pan.ok && zoom.ok && drag.ok && clamp.ok };
+  };
+
+  // ---- editor check hook -------------------------------------------------------
+  // Drives selection/edit/create/delete through real events. Mutates the world,
+  // so smoke runs it last, after the screenshot.
+  window.__cardwallEditorCheck = function () {
+    var vp = viewport;
+
+    function pointer(target, type, x, y) {
+      target.dispatchEvent(new PointerEvent(type, {
+        bubbles: true, cancelable: true, pointerId: 1, button: 0, clientX: x, clientY: y
+      }));
+    }
+    function dbl(target, x, y) {
+      target.dispatchEvent(new MouseEvent('dblclick', {
+        bubbles: true, cancelable: true, clientX: x, clientY: y
+      }));
+    }
+    function key(target, k) {
+      target.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true }));
+    }
+    function cardCenter(el) {
+      var r = el.getBoundingClientRect();
+      return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+    }
+
+    // 1. double-click the root card -> edit mode, physics paused
+    var rootEl = document.querySelector('.card');
+    var rootId = rootEl.dataset.id;
+    var rc = cardCenter(rootEl);
+    pointer(rootEl, 'pointerdown', rc.x, rc.y);
+    pointer(rootEl, 'pointerup', rc.x, rc.y);
+    dbl(rootEl, rc.x, rc.y);
+    var editStarted = editingId === rootId && worldPaused &&
+      document.querySelectorAll('.card.editing').length === 1;
+
+    // 2. typing + Enter commits the title and resumes the world
+    var titleEl = rootEl.querySelector('.card-title');
+    titleEl.textContent = '已编辑标题';
+    key(titleEl, 'Enter');
+    var committed = CardPhysics.findCard(world, rootId).title === '已编辑标题' &&
+      editingId === null && !worldPaused &&
+      document.querySelectorAll('.card.editing').length === 0;
+
+    // 3. double-click just outside a card -> new card attached to the nearest node
+    // (normalize the view first: earlier checks leave it zoomed/panned)
+    var rootCard = CardPhysics.findCard(world, rootId);
+    view.scale = 1;
+    view.x = vp.clientWidth / 2 - rootCard.x;
+    view.y = vp.clientHeight / 2 - rootCard.y;
+    applyView();
+    syncDOM();
+
+    function emptyPointNear(el) {
+      var r = el.getBoundingClientRect();
+      var cands = [
+        [r.left + r.width / 2, r.bottom + 55], // below: closest to the root centre
+        [r.left + r.width / 2, r.top - 55],
+        [r.right + 55, r.top + r.height / 2],
+        [r.left - 55, r.top + r.height / 2]
+      ];
+      for (var i = 0; i < cands.length; i++) {
+        var hit = document.elementFromPoint(cands[i][0], cands[i][1]);
+        if (!hit || !hit.closest || !hit.closest('.card')) {
+          return { x: cands[i][0], y: cands[i][1] };
+        }
+      }
+      return null;
+    }
+
+    var before = world.cards.length;
+    var cp = emptyPointNear(cardEls.get(rootId));
+    var wp = { x: (cp.x - view.x) / view.scale, y: (cp.y - view.y) / view.scale };
+    var expectParent = nearestCardId(wp, 320);
+    dbl(vp, cp.x, cp.y);
+    var newId = editingId;
+    var created = world.cards.length === before + 1 && newId !== null &&
+      expectParent !== null &&
+      CardPhysics.findCard(world, newId).parent === expectParent;
+    key(document.querySelector('.card.editing .card-title'), 'Escape'); // commit (empty -> 未命名)
+
+    // 4. Delete removes the selected card, its element and its edge path
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true }));
+    var deleted = world.cards.length === before && !cardEls.has(newId) && !edgeEls.has(newId);
+
+    // 5. deleting a mid-tree card re-parents its children to the grandparent
+    var n4el = cardEls.get('n4');
+    var n4c = cardCenter(n4el);
+    pointer(n4el, 'pointerdown', n4c.x, n4c.y);
+    pointer(n4el, 'pointerup', n4c.x, n4c.y);
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true }));
+    var reparented = CardPhysics.findCard(world, 'n5').parent === 'root' &&
+      !cardEls.has('n4') && !edgeEls.has('n4') && edgeEls.has('n5');
+
+    return {
+      ok: editStarted && committed && created && deleted && reparented,
+      editStarted: editStarted,
+      committed: committed,
+      created: created,
+      deleted: deleted,
+      reparented: reparented
+    };
   };
 })();

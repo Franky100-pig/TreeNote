@@ -59,6 +59,11 @@ function createWindow() {
         const okInteraction = !!interaction && interaction.ok;
         console.log('[smoke] interaction-check:', JSON.stringify(interaction), okInteraction ? 'PASS' : 'FAIL');
         if (!okInteraction) { app.exit(1); return; }
+        // Selection / inline edit / create / delete — mutates the world, so last.
+        const editor = await win.webContents.executeJavaScript('window.__cardwallEditorCheck()');
+        const okEditor = !!editor && editor.ok;
+        console.log('[smoke] editor-check:', JSON.stringify(editor), okEditor ? 'PASS' : 'FAIL');
+        if (!okEditor) { app.exit(1); return; }
         app.exit(0);
       } catch (err) {
         console.error('[smoke] error:', err);
