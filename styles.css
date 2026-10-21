@@ -18,9 +18,9 @@
   --accent-strong: #b9a97a;
   --accent-strong-ring: rgba(201, 169, 80, 0.42);
   --placeholder: #4b463f;
-  --panel-bg: rgba(255, 255, 255, 0.93);
-  --dbg-anchor: #c9a227;
-  --dbg-vel: #3d7fb8;
+  --panel-bg: rgba(16, 16, 18, 0.94);
+  --dbg-anchor: #d8b23a;
+  --dbg-vel: #6aa9e0;
 }
 
 * {
