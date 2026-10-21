@@ -6,3 +6,5 @@ vault/*.bak
 *.log
 .DS_Store
 smoke.png
+smoke-home.png
+vault/boards/
