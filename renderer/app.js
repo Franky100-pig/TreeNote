@@ -536,7 +536,16 @@
     if (!card) return null;
     card.pinned = !card.pinned;
     if (card.pinned) { card.vx = 0; card.vy = 0; }
-    else wakeBranch(card.id); // rejoining the float: wake, don't wait for a force
+    else {
+      // Rejoining the float: wake, don't wait for a force to exceed the
+      // threshold. Clearing `hover` is essential — the pointer is resting on
+      // the card exactly when you press P (that is how it got selected), and
+      // the integrator freezes hovered cards so the toolbar stays clickable.
+      // Without this the card stays welded in place until the mouse leaves,
+      // which reads as "P does nothing".
+      card.hover = false;
+      wakeBranch(card.id);
+    }
     var el = cardEls.get(card.id);
     if (el) el.classList.toggle('pinned', card.pinned);
     markDirty();
@@ -925,8 +934,15 @@
     var followed = followDetail.every(function (d) {
       return d.travel > 20 && Math.abs(d.toCard - d.was) < 260;
     });
-    // Unpin: it rejoins the float and the snap spring pulls it home again.
-    var pinNow = togglePin(card.id);
+    // Unpin must work with the pointer STILL ON the card — that is the real
+    // gesture (click to select, then press P). A hovered card is frozen by
+    // the integrator so its toolbar stays clickable, so togglePin has to
+    // clear `hover`; otherwise P looks dead until the mouse moves away.
+    // This goes through the real key handler, not togglePin directly.
+    select(card.id);
+    card.hover = true; // pointer resting on the card (what mouseenter would set)
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'p', bubbles: true, cancelable: true }));
+    var pinNow = card.pinned; // flipped to false by the key press
     for (var s2 = 0; s2 < 60; s2++) CardPhysics.step(world);
     var floatsAgain = Math.hypot(card.x - dropped.x, card.y - dropped.y) > 1;
     // Restore the whole branch and leave the grabbed card pinned+placed, so
