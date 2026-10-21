@@ -551,10 +551,40 @@
     }, 0);
   });
 
+  // ---- theme ---------------------------------------------------------------
+  // Dark is the default. Cmd/Ctrl+Shift+L flips to the paper theme and the
+  // choice is remembered across launches (index.html applies it before the
+  // first paint so a light board does not flash black on boot).
+  var THEME_KEY = 'cardwall.theme';
+
+  function currentTheme() {
+    return document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
+  }
+
+  function applyTheme(name) {
+    if (name === 'light') {
+      document.documentElement.dataset.theme = 'light';
+    } else {
+      delete document.documentElement.dataset.theme;
+    }
+    try {
+      localStorage.setItem(THEME_KEY, name);
+    } catch (err) { /* storage unavailable — the theme just won't persist */ }
+  }
+
+  function toggleTheme() {
+    applyTheme(currentTheme() === 'dark' ? 'light' : 'dark');
+  }
+
   window.addEventListener('keydown', function (e) {
     // The editor (viewport handler) already consumed this key; without this
     // guard an Escape that closes the editor would also clear the selection.
     if (e.defaultPrevented) return;
+    if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === 'L' || e.key === 'l')) {
+      e.preventDefault();
+      toggleTheme(); // works while editing too
+      return;
+    }
     if (editingId) return; // the editor owns the keyboard
     if ((e.key === 'Delete' || e.key === 'Backspace') && selectedId) {
       e.preventDefault();
@@ -568,6 +598,46 @@
   window.__cardwallSaveNow = function () {
     markDirty();
     return flushSave(true);
+  };
+
+  // Theme round trip through the real key handler, so smoke exercises the
+  // shortcut rather than a private function, and leaves the board on dark.
+  window.__cardwallThemeCheck = function () {
+    function probe() {
+      var card = document.querySelector('.card');
+      return {
+        theme: currentTheme(),
+        bg: getComputedStyle(document.body).backgroundColor,
+        ink: getComputedStyle(document.body).color,
+        cardBg: card ? getComputedStyle(card).backgroundColor : null
+      };
+    }
+    function press() {
+      window.dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'L', metaKey: true, shiftKey: true, bubbles: true, cancelable: true
+      }));
+    }
+    // Start from a known state: a previous session may have left the light
+    // theme stored, which would otherwise make this check environment-dependent.
+    applyTheme('dark');
+    var start = probe();
+    press();
+    var flipped = probe();
+    press();
+    var back = probe();
+    var stored = null;
+    try { stored = localStorage.getItem(THEME_KEY); } catch (err) { stored = null; }
+    var BLACK = 'rgb(0, 0, 0)';
+    return {
+      ok: start.theme === 'dark' && start.bg === BLACK &&
+        flipped.theme === 'light' && flipped.bg !== BLACK && flipped.cardBg === 'rgb(255, 255, 255)' &&
+        back.theme === 'dark' && back.bg === BLACK &&
+        stored === 'dark',
+      start: start,
+      flipped: flipped,
+      back: back,
+      stored: stored
+    };
   };
 
   // ---- self-check hook -----------------------------------------------------------

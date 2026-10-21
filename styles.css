@@ -23,6 +23,30 @@
   --dbg-vel: #6aa9e0;
 }
 
+/* The original paper theme, kept as an opt-in (Cmd/Ctrl+Shift+L). */
+[data-theme="light"] {
+  --bg: #f7f5f0;
+  --bg-fade: rgba(247, 245, 240, 0);
+  --ink: #3d3a34;
+  --muted: #8a8577;
+  --surface: #ffffff;
+  --surface-border: #e8e4da;
+  --root-border: #d8cfae;
+  --edge: #c9c2b3;
+  --shadow: rgba(61, 58, 52, 0.08);
+  --shadow-tight: rgba(61, 58, 52, 0.05);
+  --shadow-lift: rgba(61, 58, 52, 0.10);
+  --shadow-tight-lift: rgba(61, 58, 52, 0.10);
+  --accent-soft: #c9b98a;
+  --accent-soft-ring: rgba(201, 185, 138, 0.30);
+  --accent-strong: #b9a97a;
+  --accent-strong-ring: rgba(185, 169, 122, 0.45);
+  --placeholder: #b9b2a4;
+  --panel-bg: rgba(255, 255, 255, 0.93);
+  --dbg-anchor: #c9a227;
+  --dbg-vel: #3d7fb8;
+}
+
 * {
   margin: 0;
   padding: 0;

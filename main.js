@@ -183,6 +183,12 @@ function createWindow() {
         const okDbg = !!dbg && dbg.ok;
         console.log('[smoke] debug-check:', JSON.stringify(dbg), okDbg ? 'PASS' : 'FAIL');
         if (!okDbg) { app.exit(1); return; }
+        // Theme: default is dark, shortcut flips and is remembered; the board
+        // must end up dark again so the screenshot below shows the default.
+        const theme = await win.webContents.executeJavaScript('window.__cardwallThemeCheck()');
+        const okTheme = !!theme && theme.ok;
+        console.log('[smoke] theme-check:', JSON.stringify(theme), okTheme ? 'PASS' : 'FAIL');
+        if (!okTheme) { app.exit(1); return; }
         // Screenshot the settled floating state for visual review (gitignored artifact).
         const shot = await capturePainted(win);
         if (!shot) {
