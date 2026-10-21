@@ -6,30 +6,30 @@
  *
  * Per-step forces (all on non-pinned cards; pinned cards opt out):
  *   1. Pairwise repulsion (O(n^2), with cutoff) — soft spacing, no bounce.
- *   2. Structural coupling: ONE central spring per card pulls it to its LIVE
- *      anchor point (roots -> world origin, children -> parent+offset). One
- *      force centre per card means no tangential mismatch, so a dragged child
- *      trails smoothly and settles instead of orbiting its anchor forever
- *      (the old two-centre snap+tree-edge design whirled). Reaction goes to
- *      the parent so the field stays conservative.
- *   3. Per-spring (relative-velocity) damping on the structural coupling:
- *      makes the coupling critically damped regardless of the global damping,
- *      so it cannot re-pump PE->KE and slosh — it settles in <1s with no
- *      overshoot. This is the "stop, don't bounce" half of the jellyfish feel.
+ *   2. Rope coupling: each card hangs from a fixed-length line — roots from
+ *      the world origin, children from their parent. The line fixes DISTANCE
+ *      only, so a card may swing around its tether instead of being welded to
+ *      an angular slot: the tree is a string of floats being towed. Tension is
+ *      one-sided (a rope pulls, it never pushes) and elastic, so it visibly
+ *      stretches a little under load instead of behaving like a rigid rod.
+ *      Reaction goes to the parent, so the field stays conservative.
+ *   3. Radial damping on the rope (its internal resistance): opposes the rate
+ *      of stretch only, never the swing — damping the full relative velocity
+ *      would carry children along rigidly with their parent.
  *   4. Drag wake: the card in hand pushes its neighbours, distance-attenuated,
  *      in its own travel direction. Pure push, so it can never oscillate. This
  *      is the "others float by distance while you drag" half.
  *   5. Seeded Brownian drift (reproducible impulses) — the board breathes.
- *   6. Light global velocity damping — the softness that lets the drift read
- *      as jellyfish rather than elastic. Kept light BECAUSE the structural
- *      settle is handled by the per-spring damper (3), not by this.
+ *   6. Global velocity damping — it settles the SWING of a towed branch (the
+ *      rope only damps its own stretch, see 3), and it dissipates the
+ *      drag-wake / repulsion kinetic energy quickly after a drag ends.
  * Integration: fixed-step semi-implicit Euler; cards being dragged are
  * positioned externally and their velocity is recorded by the caller.
  *
  * Pinned cards opt out of all of it: they take no forces, do not drift and
  * are not integrated, so they stay exactly where the user dropped them
  * (Obsidian-style free placement). They still repel their neighbours and
- * still anchor their children, so the tree keeps its shape. This is the
+ * still tow their children, so the tree keeps its shape. This is the
  * answer to "the layout fights me": auto-layout is a starting suggestion,
  * and touching a card makes it yours.
  *
@@ -52,14 +52,12 @@
 
   var CONFIG = {
     dt: 1 / 60,            // fixed step (seconds)
-    damping: 0.95,         // per-step GLOBAL velocity damping. This is the
-                           // "floaty drift" softness AND it dissipates the
-                           // drag-wake / repulsion kinetic energy quickly after
-                           // a drag ends. The structural settle (no bounce, ~1s)
-                           // is owned by the per-spring damper, so this value is
-                           // firm enough to kill the wake slosh fast without
-                           // over-damping the structural tail (that is the
-                           // per-spring damper's job).
+    damping: 0.93,         // per-step GLOBAL velocity damping. Softer than 0.95
+                           // so a towed branch GLIDES instead of crawling: the
+                           // rope's own damper handles the radial mode, this
+                           // one just bleeds off the swing and the leftovers of
+                           // a drag. Too high and the last few px become a slow
+                           // over-damped creep.
     maxSpeed: 3000,        // velocity cap (px/s)
 
     repulsion: 90000,      // repulsion strength: a = repulsion / d (px/s^2).
@@ -68,32 +66,40 @@
                            // floating water rather than elastic coils.
     repulsionCutoff: 800,  // repulsion cutoff (px)
 
-    springRestLength: 200, // anchor ring rest length for a single child (px).
-                           // Nudged up from 150 so the stiffer coupling below
-                           // does not pull cards into overlap; keeps the ~210px
-                           // spacing the layout already had. With >1 sibling the
-                           // ring grows (ringSpacing) so a big family stays
-                           // compact; see computeAnchors.
-    springStiffness: 22,   // structural-coupling stiffness (combined with
-                           // snapStiffness into ONE central spring to the live
-                           // anchor). Stiff enough that the tree's lowest
-                           // relaxation mode is fast (~1s): ω=√K. The per-spring
-                           // damper keeps it critically damped, so the higher
-                           // stiffness reads as a quick smooth glide, not a
-                           // bounce. The lively "follow" during a drag comes from
-                           // the wake, not from this spring.
-
-    snapStiffness: 22,     // structural-coupling stiffness component for the
-                           // ring anchor. Combined with springStiffness as
-                           // K = snapStiffness + springStiffness (=44).
-
-    // Per-spring (relative-velocity) damping RATIO for the structural coupling.
-    // Critical damping of a spring of stiffness K is c = 2*sqrt(K); we run
-    // exactly critical (dampRatio = 1.0) so the coupling settles in the
-    // shortest time with NO overshoot — over-damping would creep slowly to
-    // rest (a long tail), under-damping would bounce. Critical is the sweet
-    // spot for "stop dead in ~1s, no spring snap".
-    dampRatio: 1.0,
+    // ---- rope coupling ------------------------------------------------------
+    // Every card hangs from a fixed-length line: roots from the world origin,
+    // children from their parent. The line fixes DISTANCE only — there is no
+    // angular slot — so a card may swing around its tether and the tree reads
+    // as a string of floats being towed, not as a welded radial diagram.
+    childRopeLength: 200,  // rope length for a single child (px). With more
+                           // siblings the ring grows by ringSpacing so a big
+                           // family stays compact; see computeAnchors.
+    ropeStiffness: 60,     // tension per px of stretch (px/s^2 per px). Stiff
+                           // enough that the tree's slowest mode is fast (~1s):
+                           // omega = sqrt(ropeStiffness). The rope is ELASTIC —
+                           // it visibly stretches 10-20px under a drag instead
+                           // of behaving like a rigid rod.
+    ropeDampRatio: 1.0,    // radial damping relative to critical (2*sqrt(K)).
+                           // It damps the RATE OF STRETCH, so the rope itself
+                           // never rings.
+    swingDamp: 0.4,        // tangential resistance along the rope (0..1).
+                           // 0 leaves the swing completely free — pretty, but
+                           // repulsion then walks the board around its tethers
+                           // for tens of seconds (measured), because an angle
+                           // with no restoring force is a near-neutral mode.
+                           // 1 damps the swing as hard as the stretch, which
+                           // makes a child ride along with its parent.
+    anchorStiffness: 30,   // ANGLE MEMORY: a soft pull toward the nominal slot
+                           // (children: parent + rope direction, roots: their
+                           // place on the origin ring). The rope fixes the
+                           // RADIUS but leaves the ANGLE free, and a free angle
+                           // has almost no restoring force — tangential
+                           // stiffness is only ~F/r (measured 0.6 at 400px, a
+                           // ~30s relaxation), so without this the board would
+                           // never come to rest. At 26 it is ~40% softer than
+                           // the rope, so a dragged card still visibly swings
+                           // and only then drifts back. Set to 0 for the pure
+                           // free-swinging rope.
     ringBaseRadius: 220,   // root ring base radius
     ringSpacing: 60,       // radius increment per extra sibling on the same ring
                            // (C7: 95 -> 60 — with 4 children the anchors reached
@@ -120,8 +126,13 @@
                            // per card: a ripple, not a vibration. The old 0.02
                            // fired ~1.2 times a second and read as "elastic")
 
-    sleepSpeed: 0.5,       // px/s: below this a card counts as momentarily still
-    sleepForce: 10,        // px/s^2: net force small enough to be "at rest"
+    sleepSpeed: 0.6,       // px/s: below this a card counts as momentarily still
+    sleepForce: 30,        // px/s^2: net force small enough to be "at rest".
+                           // Raised from 10 for the rope model: a hanging card
+                           // always carries a large balanced tension (K*(d-L)
+                           // ~600 px/s^2), so a tight threshold would keep a
+                           // perfectly still card awake forever on the residue
+                           // of two big forces that almost cancel.
     sleepSteps: 60,        // consecutive quiet steps (~1s) before a card sleeps
 
     cardWidth: 250,        // default card width (matches Obsidian text cards)
@@ -178,14 +189,14 @@
   }
 
   /**
-   * Ring anchors: root cards orbit the world origin (fixed); child cards
-   * orbit their parent's live position (anchor = parent pos + fixed offset).
-   * Recomputed every step so the tree never tears when a parent is dragged.
-   * The anchors map stores absolute coordinates; a non-null parentId means
-   * the anchor is rigidly attached to the parent card, so the snap force
-   * must apply an equal-and-opposite reaction to the parent. Without the
-   * reaction the field is non-conservative and energy gets pumped in
-   * forever (observed as perpetual oscillation).
+   * Ring geometry. Each card gets a ROPE: `ringR` is the rope's length (px)
+   * and `parentId` is its tether (null = the world origin). The x/y fields are
+   * the nominal rest point used for the initial layout, the debug overlay and
+   * the tests — the simulation itself never pulls a card toward them, it only
+   * enforces the rope length (see step()).
+   *
+   * Roots are all tied to the origin with one shared radius, so they orbit it;
+   * children are tied to their parent with a radius that grows per sibling.
    */
   function computeAnchors(world) {
     var cfg = world.config;
@@ -213,7 +224,7 @@
       // Child ring radius = spring rest length + sibling increment: with a
       // single child the ring matches the tree edge exactly, so snap and
       // spring never fight each other.
-      var r = cfg.springRestLength + cfg.ringSpacing * Math.max(0, kids.length - 1);
+      var r = cfg.childRopeLength + cfg.ringSpacing * Math.max(0, kids.length - 1);
       kids.forEach(function (k, i) {
         var theta = (i / kids.length) * Math.PI * 2 + 0.3;
         world.anchors.set(k.id, {
@@ -256,67 +267,90 @@
       }
     }
 
-    // 3. structural coupling — ONE central spring per card, to its LIVE
-    //    anchor point. Roots anchor at the world origin (fixed); children
-    //    anchor at parent+offset, so the anchor travels with the parent and
-    //    the branch never tears. A single force centre per card means there
-    //    is no tangential mismatch (the old snap+tree-edge two-centre design
-    //    whirled children around their anchor forever and they never slept),
-    //    so a dragged child trails smoothly and settles. Reaction forces are
-    //    applied to the parent card so the field stays conservative.
-    var K = cfg.snapStiffness + cfg.springStiffness;
-    var dampCoef = cfg.dampRatio * 2 * Math.sqrt(K); // critical damping of K, x ratio
+    // 3. rope coupling — each card hangs from a fixed-length line: roots from
+    //    the world origin, children from their parent. The line constrains
+    //    DISTANCE only, so a card can swing around its tether; nothing pulls
+    //    it into an angular slot. That is the whole difference from the old
+    //    spring: a spring owns a POINT (you always return to it, from either
+    //    side), a rope owns a LENGTH (you hang wherever the rope, the
+    //    repulsion and the drag leave you). Reaction goes to the parent, so
+    //    the field stays conservative and no energy is pumped in.
+    var K = cfg.ropeStiffness;
+    var dampCoef = cfg.ropeDampRatio * 2 * Math.sqrt(K); // critical damping of K
     for (var c = 0; c < n; c++) {
       var card = cards[c];
-      if (card.pinned) continue;
+      if (card.pinned) continue;               // pinned cards are already fixed
       var anchor = world.anchors.get(card.id);
       if (!anchor) continue;
 
-      // Centre of the coupling = the live anchor point. Its velocity is the
-      // parent card's velocity (the anchor is rigidly attached to the parent);
-      // for a root the anchor is fixed so its velocity is zero.
-      var cx = anchor.x, cy = anchor.y;
-      var cvx = 0, cvy = 0;
+      // Tether point and its velocity: the origin for a root (static), the
+      // parent card for a child (it moves, so the rope is towed along).
       var pcard = null;
+      var tx = 0, ty = 0, tvx = 0, tvy = 0;
       if (anchor.parentId) {
         pcard = findCard(world, anchor.parentId);
-        if (pcard && !pcard.pinned) { cvx = pcard.vx; cvy = pcard.vy; }
+        if (!pcard) continue;                  // dangling parent: no tether
+        tx = pcard.x; ty = pcard.y;
+        if (!pcard.pinned) { tvx = pcard.vx; tvy = pcard.vy; }
       }
+      var ropeLen = anchor.ringR;
 
-      var dx = card.x - cx, dy = card.y - cy;
+      var dx = card.x - tx, dy = card.y - ty;
       var d = Math.sqrt(dx * dx + dy * dy) || 1e-6;
-      // The card rests AT its anchor point, so the spring rest length is zero.
-      // ringR only decides WHERE the anchor sits relative to the parent (the
-      // ring radius); it is NOT the spring rest length. A non-zero rest length
-      // would make the card settle ringR *away* from the anchor and the whole
-      // layout would be pushed out by exactly the ring radius.
-      var restLen = 0;
-      var rux = dx / d, ruy = dy / d;          // unit vector card -> anchor
+      var ux = dx / d, uy = dy / d;            // unit vector tether -> card
 
-      // Restoring spring force (toward the anchor when stretched): the force
-      // on the card points from the card back to the anchor, i.e. -rux when
-      // stretched. Magnitude = K*(d - restLen).
-      var sf = (d - restLen) * K;              // +ve beyond rest, -ve inside
-      var fx = rux * sf, fy = ruy * sf;        // NOTE: force on card = -(fx,fy)
+      // One-sided tension: a rope pulls, it never pushes. Inside the rope
+      // length the line is slack and contributes nothing. Slack is transient
+      // rather than a resting state, because the pair also repels each other,
+      // so they separate until the rope goes taut. Equilibrium therefore stays
+      // the analytic K*(d-L) = repulsion/d — only now it holds at ANY angle.
+      //
+      // ROOTS ARE THE EXCEPTION: their line is a mooring to the world origin
+      // and holds the radius in BOTH directions. A one-sided root line leaves
+      // the whole board unanchored whenever the root sits inside its radius,
+      // and the tree then translates as a block (measured: every card drifting
+      // at ~14px/s, force ~45 with nothing to oppose it) until the line happens
+      // to go taut. Two-sided keeps the board's centre where it belongs while
+      // still leaving the tree free to rotate around the origin.
+      var stretch = d - ropeLen;
+      var tension = anchor.parentId ? (stretch > 0 ? stretch * K : 0) : stretch * K;
+      var fx = ux * tension, fy = uy * tension;
 
-      // Per-spring (relative-velocity) damper: opposes the FULL card<->anchor
-      // relative velocity — both the radial stretch and any tangential swing,
-      // not just the radial component. Damping only the radial part left the
-      // tangential swing to be killed solely by the light global damping,
-      // which made the branch slosh for seconds (a dragged child whips around
-      // to its anchor angle and keeps ringing). Damping the whole relative
-      // velocity makes the coupling critically damped in 2D: the radial mode is
-      // a critically-damped oscillator and the tangential mode is a first-order
-      // viscous decay, so a dragged child trails and stops in well under a
-      // second with no overshoot. dampCoef = dampRatio*2*sqrt(K) is critical at
-      // dampRatio=1 — over-damping would creep, under-damping would bounce.
-      var rvx = card.vx - cvx, rvy = card.vy - cvy;
-      var dfx = rvx * dampCoef, dfy = rvy * dampCoef; // opposes relative motion
+      // Rope resistance, split into the two modes the line actually has:
+      //   radial  — the rate of stretch. Critical here (ropeDampRatio) so the
+      //             rope never rings.
+      //   tangential — the swing. A real rope has none, but a pure swing mode
+      //             is excited by repulsion and has almost no restoring force
+      //             (the angle is free), so the board would creep around its
+      //             tethers for tens of seconds instead of settling. The
+      //             swing damper (0..1) is the "wet rope" knob: 0 = perfectly
+      //             free swing, 1 = the child is dragged along with its parent.
+      var rvx = card.vx - tvx, rvy = card.vy - tvy;
+      var rvRad = rvx * ux + rvy * uy;
+      var rvTan = -rvx * uy + rvy * ux;
+      var dampRad = rvRad * dampCoef;
+      var dampTan = rvTan * dampCoef * cfg.swingDamp;
+      fx += ux * dampRad - uy * dampTan;
+      fy += uy * dampRad + ux * dampTan;
 
-      // Force on card = -(spring + damper); equal-and-opposite on the parent.
-      card.fx -= fx + dfx;
-      card.fy -= fy + dfy;
-      if (pcard) { pcard.fx += fx + dfx; pcard.fy += fy + dfy; }
+      // Angle memory. The rope fixes the radius, so the ANGLE is free — and a
+      // free angle has almost no restoring force (tangential stiffness is only
+      // ~F/r, measured ≈0.6 at 400px, which gives a ~30s relaxation). A soft
+      // pull toward the nominal slot gives that mode a gentle gradient without
+      // turning the rope into a spring: anchorStiffness is ~3x softer than
+      // ropeStiffness, so during a drag the rope still owns the radial motion
+      // and the card visibly swings; the memory only decides where it comes to
+      // rest. anchorStiffness = 0 restores the pure free-swinging rope.
+      if (cfg.anchorStiffness > 0) {
+        var mx = card.x - anchor.x, my = card.y - anchor.y;
+        card.fx -= mx * cfg.anchorStiffness;
+        card.fy -= my * cfg.anchorStiffness;
+        if (pcard) { pcard.fx += mx * cfg.anchorStiffness; pcard.fy += my * cfg.anchorStiffness; }
+      }
+      // Force on the card points back along the rope (toward the tether);
+      // equal-and-opposite on the parent. A root has nothing to push against.
+      card.fx -= fx; card.fy -= fy;
+      if (pcard) { pcard.fx += fx; pcard.fy += fy; }
     }
 
     // 4. drag wake — a moving card carries its neighbours along, distance
@@ -442,15 +476,20 @@
       e += 0.5 * (c.vx * c.vx + c.vy * c.vy);
       var anchor = world.anchors.get(c.id);
       if (anchor) {
-        var ax = anchor.x - c.x, ay = anchor.y - c.y;
-        e += 0.5 * cfg.snapStiffness * (ax * ax + ay * ay);
-      }
-      if (c.parent) {
-        var p = findCard(world, c.parent);
-        if (p) {
-          var dx = p.x - c.x, dy = p.y - c.y;
-          var d = Math.sqrt(dx * dx + dy * dy);
-          e += 0.5 * cfg.springStiffness * (d - cfg.springRestLength) * (d - cfg.springRestLength);
+        // Rope PE: only a stretched rope stores energy (one-sided).
+        var tetherX = 0, tetherY = 0;
+        if (anchor.parentId) {
+          var p = findCard(world, anchor.parentId);
+          if (p) { tetherX = p.x; tetherY = p.y; }
+        }
+        var rx = c.x - tetherX, ry = c.y - tetherY;
+        var rd = Math.sqrt(rx * rx + ry * ry);
+        var stretch = rd - anchor.ringR;
+        if (stretch > 0) e += 0.5 * cfg.ropeStiffness * stretch * stretch;
+        // Angle-memory PE (a soft 2D pull toward the nominal slot).
+        if (cfg.anchorStiffness > 0) {
+          var ax = c.x - anchor.x, ay = c.y - anchor.y;
+          e += 0.5 * cfg.anchorStiffness * (ax * ax + ay * ay);
         }
       }
     }

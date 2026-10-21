@@ -57,49 +57,52 @@ test('排斥：重叠卡片被推开', () => {
   assert.ok(d1 > d0 + 50, `distance should grow: d0=${d0.toFixed(1)} d1=${d1.toFixed(1)}`);
 });
 
-test('回弹：单根卡偏离锚点后收敛回锚点', () => {
+test('绳子：单根卡被拉远后收敛到绳长，角度不被约束', () => {
   const w = makeWorld({ drift: false });
   addCard(w, { id: 'solo', x: 800, y: 600 });
   computeAnchors(w);
-  const d0 = Math.hypot(w.cards[0].x - w.anchors.get('solo').x, w.cards[0].y - w.anchors.get('solo').y);
+  const ropeLen = w.anchors.get('solo').ringR;
+  const r0 = Math.hypot(w.cards[0].x, w.cards[0].y);
   for (let i = 0; i < 900; i++) step(w);
   const solo = w.cards[0];
-  const anchor = w.anchors.get('solo');
-  const dist = Math.hypot(solo.x - anchor.x, solo.y - anchor.y);
-  assert.ok(dist < 5, `snap-back within 5px (from ${d0.toFixed(0)}), got ${dist.toFixed(2)}`);
+  const r = Math.hypot(solo.x, solo.y);
+  assert.ok(r0 > ropeLen, 'setup: card starts outside its rope');
+  assert.ok(Math.abs(r - ropeLen) < 1, `settles exactly on the rope (${ropeLen}), got ${r.toFixed(2)}`);
+  // 绳子只约束距离：方向沿初始的 (0.8, 0.6) 保持住，没有任何力把它拽回某个角度槽
+  assert.ok(solo.x > 0 && solo.y > 0, 'kept its own direction (no angular snap-back)');
+  assert.ok(Math.hypot(solo.vx, solo.vy) < 1, 'at rest');
 });
 
-test('回弹：子卡被拉远后回到父卡附近的 ring 位', () => {
+test('绳子：子卡被拉远后停在父卡外 K·(d−L)=repulsion/d 处', () => {
   const w = makeWorld({ drift: false });
   addCard(w, { id: 'p', x: 0, y: 0 });
   addCard(w, { id: 'k', x: 800, y: 600, parent: 'p' });
   const cfg = w.config;
-  const K = cfg.snapStiffness + cfg.springStiffness;
-  const dTheory = (K * cfg.springRestLength +
-    Math.sqrt(K * K * cfg.springRestLength * cfg.springRestLength + 4 * K * cfg.repulsion)) / (2 * K);
+  // 绳张力与角度记忆都沿径向（对齐时同向），合成径向刚度 K = rope + anchor。
+  const K = cfg.ropeStiffness + cfg.anchorStiffness;
+  const dTheory = (K * cfg.childRopeLength +
+    Math.sqrt(K * K * cfg.childRopeLength * cfg.childRopeLength + 4 * K * cfg.repulsion)) / (2 * K);
   for (let i = 0; i < 900; i++) step(w);
   const k = w.cards[1];
-  const anchor = w.anchors.get('k');
-  // 子卡静止在锚点角向、距父卡 dTheory 处；排斥力把卡从锚点再外推约
-  // (dTheory - ringR) ≈ 60px，这是设计使然的「呼吸空间」，非收敛缺陷。
-  const dist = Math.hypot(k.x - anchor.x, k.y - anchor.y);
-  assert.ok(dist < 80, `child settles near its ring anchor (repulsion-shifted), got ${dist.toFixed(2)}`);
   const dParent = Math.hypot(k.x - w.cards[0].x, k.y - w.cards[0].y);
-  assert.ok(Math.abs(dParent - dTheory) < 8, `parent-child distance = radial equilibrium ${dTheory.toFixed(0)}: ${dParent.toFixed(0)}`);
+  assert.ok(Math.abs(dParent - dTheory) < 8, `parent-child distance = rope equilibrium ${dTheory.toFixed(0)}: ${dParent.toFixed(0)}`);
+  // 绳子可形变：被排斥撑开的量应该只有十几像素，说明它接近定长而不是橡皮筋
+  const stretch = dParent - cfg.childRopeLength;
+  assert.ok(stretch > 0 && stretch < 25, `rope stretches a little, not a lot: +${stretch.toFixed(1)}px`);
   const speed = Math.hypot(k.vx, k.vy);
   assert.ok(speed < 1, `child fully at rest: speed=${speed.toFixed(3)}`);
 });
 
-test('平衡点：父子静止距离符合解析解 K*(d-rest)=repulsion/d', () => {
-  // 环半径=弹簧自然长度时 snap/spring 同向，总刚度 K=snap+spring，
-  // 与排斥平衡：K*(d-rest) = repulsion/d → 二次方程正根即理论静止距离。
+test('平衡点：父子静止距离符合解析解 K*(d-L)=repulsion/d', () => {
+  // 绳长 L 与排斥平衡：K*(d-L) = repulsion/d → 二次方程正根即理论静止距离。
   const w = makeWorld({ drift: false });
   addCard(w, { id: 'p', x: 0, y: 0 });
   addCard(w, { id: 'k', x: 800, y: 600, parent: 'p' });
   const cfg = w.config;
-  const K = cfg.snapStiffness + cfg.springStiffness;
-  const dTheory = (K * cfg.springRestLength +
-    Math.sqrt(K * K * cfg.springRestLength * cfg.springRestLength + 4 * K * cfg.repulsion)) / (2 * K);
+  // 绳张力与角度记忆都沿径向（对齐时同向），合成径向刚度 K = rope + anchor。
+  const K = cfg.ropeStiffness + cfg.anchorStiffness;
+  const dTheory = (K * cfg.childRopeLength +
+    Math.sqrt(K * K * cfg.childRopeLength * cfg.childRopeLength + 4 * K * cfg.repulsion)) / (2 * K);
   for (let i = 0; i < 900; i++) step(w);
   const dActual = Math.hypot(w.cards[1].x - w.cards[0].x, w.cards[1].y - w.cards[0].y);
   assert.ok(Math.abs(dActual - dTheory) < 5,
@@ -200,7 +203,7 @@ test('休眠：安定后卡片停止积分，位置逐位冻结', () => {
   assert.equal(c.vy, 0);
 });
 
-test('休眠：被拉动的邻居会把它唤醒，并跟上去', () => {
+test('休眠：被拉动的父卡把子卡唤醒，绳子维持长度', () => {
   const w = makeWorld({ drift: false });
   addCard(w, { id: 'p', x: 0, y: 0 });
   addCard(w, { id: 'k', x: 40, y: 0, parent: 'p' });
@@ -208,12 +211,20 @@ test('休眠：被拉动的邻居会把它唤醒，并跟上去', () => {
   const p = w.cards[0], k = w.cards[1];
   assert.equal(k.awake, false, 'child asleep after settling');
   const d0 = Math.hypot(k.x - p.x, k.y - p.y);
+  const kx0 = k.x;
   p.pinned = true;
-  p.x += 400; // yank the parent, as a drag would
-  for (let i = 0; i < 300; i++) step(w);
+  p.x -= 400; // yank the parent away, as a drag would: the rope goes taut
+  let woke = false;
+  for (let i = 0; i < 300; i++) {
+    step(w);
+    if (k.awake) woke = true;
+  }
   const d1 = Math.hypot(k.x - p.x, k.y - p.y);
-  assert.ok(d1 < d0 + 60, `child followed the parent: ${d0.toFixed(0)} -> ${d1.toFixed(0)}`);
-  assert.ok(k.x > 250, `child actually travelled: x=${k.x.toFixed(0)}`);
+  // 绳子只保距不保位：父卡朝子卡冲过去时绳子先松、再被排斥撑回原长，
+  // 所以子卡是「被推开」而不是「被拖着平移」——这是定长绳子的定义行为。
+  assert.ok(woke, 'child woke up when the parent moved');
+  assert.ok(Math.abs(d1 - d0) < 30, `rope keeps its length: ${d0.toFixed(0)} -> ${d1.toFixed(0)}`);
+  assert.ok(Math.abs(k.x - kx0) > 20, `child actually responded: dx=${(k.x - kx0).toFixed(0)}`);
 });
 
 test('整体固定：漂移开着，安定 20s 后 60s 内位移小于 30px', () => {
