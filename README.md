@@ -1,8 +1,12 @@
-# cardwall
+# cardwall（TreeNote）
+
+> The next version of taking digital notes — 但笔记得能飘。
 
 力导向**漂浮卡片墙**笔记工具：要点级卡片 + 自由拖动 + 物理飘动（斥力 / 弹簧 / 阻尼 / 布朗漂移 / 释放惯性）。
 
 Electron 桌面应用，零前端框架：DOM 卡片 + SVG 连线 + CSS transform 世界容器，架构对标 Obsidian Canvas 的逆向结论（证据见仓库外 `obsidian-canvas-re/RE-obsidian-canvas.md`）。与 Obsidian 的关键差异：Canvas 没有物理、没有释放惯性；cardwall 的整棵树靠力场持续轻微呼吸。
+
+默认黑色画布（`Cmd/Ctrl+Shift+L` 可切回纸感浅色，选择会被记住）：
 
 ![settled](docs/settled.png)
 
@@ -10,13 +14,17 @@ Electron 桌面应用，零前端框架：DOM 卡片 + SVG 连线 + CSS transfor
 
 ![debug](docs/debug.png)
 
+浅色主题（同一棵树，`Cmd/Ctrl+Shift+L` 切换）：
+
+![light theme](docs/theme-light.png)
+
 ## 开发
 
 ```bash
 npm install
 npm start          # 正常启动
 npm test           # 物理引擎单测（9 项）
-npm run smoke      # 七层自检：渲染 / 相机 / 调试 / 交互 / 编辑 / 存盘 / 读盘 + 截图
+npm run smoke      # 八层自检：渲染 / 相机 / 调试 / 主题 / 交互 / 编辑 / 存盘 / 读盘 + 截图
 npm run dist       # 打包 macOS dmg
 ```
 
@@ -56,8 +64,19 @@ npm run dist
 | 拖动 | 按住卡片拖动，松手有惯性与回弹 |
 | 平移 / 缩放 | 拖动空白处 / 滚轮（以光标为锚点，缩放范围 0.2–2.5） |
 | 调试叠加 | `F3`（Mac 上可能是 Fn+F3）或 `Cmd+Shift+D`：fps、卡数、仿真时间、scale、峰值速度、机械能、锚点、速度矢量 |
+| 切换主题 | `Cmd/Ctrl+Shift+L`：黑色画布 ⇄ 纸感浅色，偏好存 localStorage |
 
 编辑时物理世界会暂停（否则文字在光标下滑动），提交后恢复。
+
+## 主题
+
+所有颜色都从 `styles.css` 顶部的语义 token 取（`--bg` / `--surface` / `--ink` / `--edge` / `--accent-*` …），一套 token 定义就是一种主题：
+
+- `:root` 是默认的深色（纯黑画布 `#000000` + `#16161a` 卡片），也是启动即见的样子
+- `[data-theme="light"]` 覆盖同一组 token，还原最初的纸感配色
+- 首帧由 `renderer/theme-boot.js` 在 `<head>` 里抢先应用（CSP 禁内联脚本，故独立成文件）；如果等到 `app.js` 再设，浅色主题会先闪一下黑
+
+想加第三套主题（比如高对比 / 护眼），复制一份 token 块 + 在 `applyTheme` 里多认一个名字即可，不需要碰任何组件样式。
 
 ## 物理参数（`renderer/physics.js` 的 `CONFIG`）
 
@@ -83,9 +102,10 @@ npm run dist
 ## 结构
 
 ```
-main.js                 Electron 主进程：窗口、IPC、vault 原子写、七层 smoke 断言
+main.js                 Electron 主进程：窗口、IPC、vault 原子写、八层 smoke 断言
 preload.js              contextBridge：loadBoard / saveBoard
-index.html styles.css    外壳与卡片/边/调试面板样式
+index.html styles.css    外壳、主题 token（深色默认 + 浅色覆盖）、卡片/边/调试面板样式
+renderer/theme-boot.js  首帧应用已保存的主题（避免浅色闪黑）
 renderer/physics.js     力导向积分器（UMD，Node 单测 + 浏览器共用）
 renderer/app.js         世界容器、边几何、固定步长循环、相机、编辑、持久化接线
 renderer/interaction.js 平移 / 锚点缩放 / 拖拽 + 释放惯性 / 改挂
@@ -105,6 +125,7 @@ test/physics.test.mjs   9 项单测
 - [x] C7 手感调参 + F3 调试叠加
 - [x] C8 dmg 打包（electron-builder，arm64）
 - [x] C9 README/截图/tag
+- [x] C10 深色主题（纯黑画布 + `Cmd/Ctrl+Shift+L` 切换 + 首帧无闪）
 
 ## 许可
 
