@@ -1,12 +1,26 @@
+/* Theme tokens: every colour the UI draws comes from here, so a theme is
+   just a different set of these values. */
 :root {
   --bg: #f7f5f0;
+  --bg-fade: rgba(247, 245, 240, 0);
   --ink: #3d3a34;
   --muted: #8a8577;
-  --card-bg: #ffffff;
-  --card-border: #e8e4da;
+  --surface: #ffffff;
+  --surface-border: #e8e4da;
   --root-border: #d8cfae;
   --edge: #c9c2b3;
   --shadow: rgba(61, 58, 52, 0.08);
+  --shadow-tight: rgba(61, 58, 52, 0.05);
+  --shadow-lift: rgba(61, 58, 52, 0.10);
+  --shadow-tight-lift: rgba(61, 58, 52, 0.10);
+  --accent-soft: #c9b98a;
+  --accent-soft-ring: rgba(201, 185, 138, 0.30);
+  --accent-strong: #b9a97a;
+  --accent-strong-ring: rgba(185, 169, 122, 0.45);
+  --placeholder: #b9b2a4;
+  --panel-bg: rgba(255, 255, 255, 0.93);
+  --dbg-anchor: #c9a227;
+  --dbg-vel: #3d7fb8;
 }
 
 * {
@@ -43,7 +57,7 @@ body {
   padding: 0 16px;
   z-index: 10;
   pointer-events: none;
-  background: linear-gradient(var(--bg) 60%, rgba(247, 245, 240, 0));
+  background: linear-gradient(var(--bg) 60%, var(--bg-fade));
 }
 
 #toolbar .brand {
@@ -102,27 +116,27 @@ body {
   width: 250px;
   min-height: 56px;
   padding: 10px 12px;
-  background: var(--card-bg);
-  border: 1px solid var(--card-border);
+  background: var(--surface);
+  border: 1px solid var(--surface-border);
   border-radius: 10px;
-  box-shadow: 0 1px 2px rgba(61, 58, 52, 0.05), 0 4px 12px var(--shadow);
+  box-shadow: 0 1px 2px var(--shadow-tight), 0 4px 12px var(--shadow);
   user-select: none;
   cursor: grab;
 }
 
 .card.dragging {
   cursor: grabbing;
-  box-shadow: 0 4px 8px rgba(61, 58, 52, 0.10), 0 12px 28px var(--shadow);
+  box-shadow: 0 4px 8px var(--shadow-tight-lift), 0 12px 28px var(--shadow-lift);
 }
 
 .card.selected {
-  border-color: #c9b98a;
-  box-shadow: 0 0 0 2px rgba(201, 185, 138, 0.30), 0 4px 12px var(--shadow);
+  border-color: var(--accent-soft);
+  box-shadow: 0 0 0 2px var(--accent-soft-ring), 0 4px 12px var(--shadow);
 }
 
 .card.editing {
-  border-color: #b9a97a;
-  box-shadow: 0 0 0 2px rgba(185, 169, 122, 0.45), 0 4px 12px var(--shadow);
+  border-color: var(--accent-strong);
+  box-shadow: 0 0 0 2px var(--accent-strong-ring), 0 4px 12px var(--shadow);
   cursor: text;
 }
 
@@ -135,7 +149,7 @@ body {
 .card.editing .card-title:empty::before,
 .card.editing .card-note:empty::before {
   content: attr(data-placeholder);
-  color: #b9b2a4;
+  color: var(--placeholder);
 }
 
 /* ---- debug overlay (C7, F3) -------------------------------------------- */
@@ -145,8 +159,8 @@ body {
   bottom: 14px;
   min-width: 200px;
   padding: 10px 12px;
-  background: rgba(255, 255, 255, 0.93);
-  border: 1px solid var(--card-border);
+  background: var(--panel-bg);
+  border: 1px solid var(--surface-border);
   border-radius: 8px;
   box-shadow: 0 4px 16px var(--shadow);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -165,19 +179,19 @@ body {
 
 .dbg-anchor {
   fill: none;
-  stroke: #c9a227;
+  stroke: var(--dbg-anchor);
   stroke-width: 1.6;
 }
 
 .dbg-anchor-line {
-  stroke: #c9a227;
+  stroke: var(--dbg-anchor);
   stroke-width: 1;
   stroke-dasharray: 4 4;
   opacity: 0.65;
 }
 
 .dbg-vel {
-  stroke: #3d7fb8;
+  stroke: var(--dbg-vel);
   stroke-width: 1.6;
 }
 
