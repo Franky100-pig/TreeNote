@@ -12,6 +12,12 @@
  *   no release inertia, no spring pulling it home. Obsidian behaves this
  *   way and it is what "free placement" means: the auto-layout may suggest
  *   a spot, but once you touch a card the spot is yours. `P` unpins.
+ *   Only the grabbed card follows the pointer. Everything else — the
+ *   branch included — is left to the physics: springs and repulsion drag
+ *   them along, so the rest of the wall floats behind the one in your hand
+ *   instead of snapping rigidly with it. Freezing the whole branch would
+ *   make the board feel like a solid slab; letting the forces do the work is
+ *   the "拖动的时候其他一起漂浮" behaviour.
  *
  * Not implemented: pinch-zoom, shift axis lock, alt-duplicate, auto-pan near
  * edges (Obsidian behaviors noted in the RE report for later phases).
@@ -31,9 +37,10 @@
     var onUserInteract = opts.onUserInteract || function () {};
     var onCardPlaced = opts.onCardPlaced || function () {};
     var onCardDropped = opts.onCardDropped || function () {};
+    var onGrab = opts.onGrab || function () {};
     var raise = opts.raise || function () {};
 
-    var cardDrag = null; // { card, el, sub: [descendants], grab: {x, y} }
+    var cardDrag = null; // { card, el, grab: {x, y} }
     var panDrag = null;  // { startX, startY, viewX, viewY }
 
     function screenToWorld(clientX, clientY) {
@@ -62,13 +69,15 @@
         card.pinned = true;
         card.vx = 0;
         card.vy = 0;
+        // Wake the branch so it starts floating right away instead of
+        // sitting frozen until the force grows past the sleep threshold.
+        onGrab(card);
         // Grab offset: the card keeps the exact point you grabbed it by, so
         // it does not jump its centre to the cursor (Obsidian behaviour).
         var w0 = screenToWorld(e.clientX, e.clientY);
         cardDrag = {
           card: card,
           el: cardEl,
-          sub: opts.descendants ? opts.descendants(card.id) : [],
           grab: { x: card.x - w0.x, y: card.y - w0.y }
         };
       } else {
@@ -80,20 +89,10 @@
     viewport.addEventListener('pointermove', function (e) {
       if (cardDrag) {
         var w = screenToWorld(e.clientX, e.clientY);
-        var nx = w.x + cardDrag.grab.x;
-        var ny = w.y + cardDrag.grab.y;
-        var dx = nx - cardDrag.card.x;
-        var dy = ny - cardDrag.card.y;
-        cardDrag.card.x = nx;
-        cardDrag.card.y = ny;
-        // Move the subtree rigidly rather than letting the springs drag it
-        // along behind: the branch stays exactly as you arranged it, and
-        // since every child anchor is parent + fixed offset, translating both
-        // by the same delta leaves zero residual force at release.
-        for (var i = 0; i < cardDrag.sub.length; i++) {
-          cardDrag.sub[i].x += dx;
-          cardDrag.sub[i].y += dy;
-        }
+        // The grabbed card tracks the pointer exactly; everything else is
+        // moved by the physics on the next tick.
+        cardDrag.card.x = w.x + cardDrag.grab.x;
+        cardDrag.card.y = w.y + cardDrag.grab.y;
         syncDOM();
       } else if (panDrag) {
         view.x = panDrag.viewX + (e.clientX - panDrag.startX);

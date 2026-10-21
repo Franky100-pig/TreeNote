@@ -442,8 +442,8 @@
     return false;
   }
 
-  // Every card below `id`, in tree order — a dragged card carries its branch
-  // so the branch keeps the shape you arranged it in.
+  // Every card below `id`, in tree order — used to wake a whole branch so it
+  // floats along when its root is grabbed.
   function descendantsOf(id) {
     var out = [];
     var frontier = [id];
@@ -456,6 +456,15 @@
       });
     }
     return out;
+  }
+
+  // Wake a card and its branch: dormancy keeps the board still, but anything
+  // the user touches should come alive immediately.
+  function wakeBranch(id) {
+    var card = CardPhysics.findCard(world, id);
+    if (!card) return;
+    CardPhysics.wake(card);
+    descendantsOf(id).forEach(CardPhysics.wake);
   }
 
   function reparent(card, targetId) {
@@ -501,6 +510,7 @@
     if (!card) return null;
     card.pinned = !card.pinned;
     if (card.pinned) { card.vx = 0; card.vy = 0; }
+    else wakeBranch(card.id); // rejoining the float: wake, don't wait for a force
     var el = cardEls.get(card.id);
     if (el) el.classList.toggle('pinned', card.pinned);
     markDirty();
@@ -776,7 +786,7 @@
     onCardPlaced: markDirty,
     onCardDropped: reparent,
     cardAt: cardAt,
-    descendants: descendantsOf,
+    onGrab: function (card) { wakeBranch(card.id); },
     raise: raise,
     findCard: function (id) { return CardPhysics.findCard(world, id); }
   });
@@ -819,9 +829,10 @@
     };
 
     // 3. card drag: grab the first card, move +80px, release.
-    //    Free placement: the card pins on grab, keeps the drop position
-    //    exactly (no spring, no inertia), carries its branch rigidly, and
-    //    rejoins the float when unpinned.
+    //    Free placement: the card pins on grab and keeps the drop position
+    //    exactly (no spring, no inertia). The branch is NOT translated with
+    //    the pointer any more — it is pulled along by the springs, so it
+    //    trails behind and floats into place instead of moving as a slab.
     var cardEl = document.querySelector('.card');
     var card = CardPhysics.findCard(world, cardEl.dataset.id);
     var sub = descendantsOf(card.id);
@@ -835,15 +846,31 @@
     fire('pointerup', cardEl, cx + 80, cy);
     var dropped = { x: card.x, y: card.y };
     var movedBy = card.x - start.x; // 80 screen px expressed in world units
-    // Branch moves as one piece: same delta, no relative slip.
-    var rigid = sub.every(function (s) {
+    // Nothing was carried by the pointer: at drop time the branch has not
+    // moved at all (only the grabbed card did).
+    var floaty = sub.every(function (s) {
       var b = before.filter(function (e) { return e.c === s; })[0];
-      return Math.abs((s.x - b.x) - movedBy) < 1e-6 && Math.abs(s.y - b.y) < 1e-6;
+      return Math.hypot(s.x - b.x, s.y - b.y) < 1e-9;
     });
-    // 240 physics steps with drift on: a pinned card must not budge by an
-    // epsilon, let alone drift back toward its anchor.
+    // 240 physics steps with drift on: the pinned card must not budge by an
+    // epsilon, while every card in its branch floats after it and settles
+    // back inside its ring around the new position.
     for (var s1 = 0; s1 < 240; s1++) CardPhysics.step(world);
     var heldStill = Math.abs(card.x - dropped.x) < 1e-9 && Math.abs(card.y - dropped.y) < 1e-9;
+    // Every card in the branch travelled, and it came to rest at roughly the
+    // same distance from the grabbed card as before (same geometry, reached
+    // by floating rather than by a rigid offset).
+    var followDetail = sub.map(function (s) {
+      var b = before.filter(function (e) { return e.c === s; })[0];
+      return {
+        travel: Math.round(Math.hypot(s.x - b.x, s.y - b.y)),
+        toCard: Math.round(Math.hypot(s.x - card.x, s.y - card.y)),
+        was: Math.round(Math.hypot(b.x - start.x, b.y - start.y))
+      };
+    });
+    var followed = followDetail.every(function (d) {
+      return d.travel > 20 && Math.abs(d.toCard - d.was) < 260;
+    });
     // Unpin: it rejoins the float and the snap spring pulls it home again.
     var pinNow = togglePin(card.id);
     for (var s2 = 0; s2 < 60; s2++) CardPhysics.step(world);
@@ -856,9 +883,10 @@
     togglePin(card.id);
     var drag = {
       ok: !card.dragging && movedBy > 60 && card.pinned && card.vx === 0 &&
-        heldStill && rigid && pinNow === false && floatsAgain,
+        heldStill && floaty && followed && pinNow === false && floatsAgain,
       moved: movedBy, vx: card.vx, dragging: card.dragging, branch: sub.length,
-      pinned: card.pinned, heldStill: heldStill, rigid: rigid, floatsAgain: floatsAgain
+      pinned: card.pinned, heldStill: heldStill, floaty: floaty,
+      followed: followed, follow: followDetail, floatsAgain: floatsAgain
     };
 
     // 4. clamp: wheel all the way out then all the way in stays in range
