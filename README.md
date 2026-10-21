@@ -33,7 +33,7 @@ npm run dist       # 打包 macOS dmg
 ### 打包
 
 ```bash
-npm run dist       # → dist/cardwall-0.1.0-arm64.dmg
+npm run dist       # → dist/cardwall-0.2.0-arm64.dmg
 ```
 
 未做代码签名（无 Developer ID）+ 使用 Electron 默认图标，首次打开需在 Finder 里右键 →「打开」。国内网络建议带镜像：
