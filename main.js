@@ -36,6 +36,43 @@ const MAX_CARDS = 5000;
 const MAX_TITLE = 500;
 const MAX_NOTE = 20000;
 
+// capturePage can return a frame the compositor has not painted yet, which
+// comes back as a blank canvas. Swapping the theme made this reproducible
+// (~1 run in 3), so the screenshot path now waits for two animation frames
+// and then checks that the image actually contains content.
+function frameInkRatio(img) {
+  const size = img.getSize();
+  const bmp = img.getBitmap();
+  const total = size.width * size.height;
+  if (!total || bmp.length < total * 4) return 0;
+  const b = bmp[0];
+  const g = bmp[1];
+  const r = bmp[2];
+  let differing = 0;
+  for (let i = 0; i < total * 4; i += 4) {
+    if (Math.abs(bmp[i] - b) > 10 || Math.abs(bmp[i + 1] - g) > 10 || Math.abs(bmp[i + 2] - r) > 10) {
+      differing++;
+    }
+  }
+  return differing / total;
+}
+
+async function capturePainted(win, minInk) {
+  const threshold = minInk === undefined ? 0.02 : minInk;
+  for (let attempt = 1; attempt <= 4; attempt++) {
+    await win.webContents.executeJavaScript(
+      'new Promise(function (r) { requestAnimationFrame(function () { requestAnimationFrame(r); }); })'
+    );
+    await new Promise((resolve) => setTimeout(resolve, 80 * attempt));
+    const img = await win.webContents.capturePage();
+    const ink = frameInkRatio(img);
+    if (ink >= threshold) return { img: img, ink: ink, attempt: attempt };
+    console.log('[smoke] capture retry: ink', ink.toFixed(4), 'attempt', attempt);
+  }
+  return null;
+}
+
+
 function readBoard() {
   try {
     const data = JSON.parse(fs.readFileSync(BOARD_FILE, 'utf8'));
@@ -147,9 +184,14 @@ function createWindow() {
         console.log('[smoke] debug-check:', JSON.stringify(dbg), okDbg ? 'PASS' : 'FAIL');
         if (!okDbg) { app.exit(1); return; }
         // Screenshot the settled floating state for visual review (gitignored artifact).
-        const img = await win.webContents.capturePage();
-        fs.writeFileSync(SMOKE_SHOT, img.toPNG());
-        console.log('[smoke] screenshot ->', SMOKE_SHOT);
+        const shot = await capturePainted(win);
+        if (!shot) {
+          console.error('[smoke] FAIL screenshot never painted (blank frames only)');
+          app.exit(1);
+          return;
+        }
+        fs.writeFileSync(SMOKE_SHOT, shot.img.toPNG());
+        console.log('[smoke] screenshot ->', SMOKE_SHOT, 'ink', shot.ink.toFixed(3), 'attempt', shot.attempt);
         // Synthetic pointer/wheel events against the real interaction listeners.
         const interaction = await win.webContents.executeJavaScript('window.__cardwallInteractionCheck()');
         const okInteraction = !!interaction && interaction.ok;
