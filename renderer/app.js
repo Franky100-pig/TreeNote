@@ -54,6 +54,32 @@
     note.dataset.placeholder = '补充说明（可留空）';
     el.appendChild(title);
     el.appendChild(note);
+
+    // Hover action bar: edit / add child / delete. Appears on hover (CSS)
+    // and is the main way to act on a card without dragging it. The buttons
+    // are handled by a delegated click listener on the viewport; this is
+    // just the markup. `tabindex=-1` keeps them out of the tab order so the
+    // card body stays the keyboard target while editing.
+    var toolbar = document.createElement('div');
+    toolbar.className = 'card-toolbar';
+    toolbar.innerHTML =
+      '<button data-act="edit" title="编辑 (或双击卡片)" tabindex="-1" aria-label="编辑">✎</button>' +
+      '<button data-act="add" title="新建子节点" tabindex="-1" aria-label="新建子节点">＋</button>' +
+      '<button data-act="del" title="删除节点" tabindex="-1" aria-label="删除节点">✕</button>';
+    el.appendChild(toolbar);
+
+    // Freeze the card while the pointer is over it so the bar never slides
+    // out from under the cursor. The flag is read by the physics integrator;
+    // it is not persisted and is not a pin.
+    el.addEventListener('mouseenter', function () {
+      card.hover = true;
+      card.vx = 0;
+      card.vy = 0;
+    });
+    el.addEventListener('mouseleave', function () {
+      card.hover = false;
+    });
+
     cardEls.set(card.id, el);
     return el;
   }
@@ -547,8 +573,10 @@
   });
 
   // Double-click a card to edit it; double-click empty canvas to add a card
-  // (child of the selection, if any).
+  // (child of the selection, if any). Toolbar buttons have their own click
+  // handlers and must not also trigger a double-click edit.
   viewport.addEventListener('dblclick', function (e) {
+    if (e.target.closest && e.target.closest('.card-toolbar')) return;
     var cardEl = e.target.closest ? e.target.closest('.card') : null;
     if (cardEl) {
       var card = CardPhysics.findCard(world, cardEl.dataset.id);
@@ -563,6 +591,32 @@
       y: (e.clientY - rect.top - view.y) / view.scale
     };
     createCard(p, nearestCardId(p, 320));
+  });
+
+  // Hover action bar (edit / add / delete) — delegated so it covers every
+  // card, including ones created on the fly. The pointerdown handler in
+  // interaction.js already declines to drag/pan when the press lands on the
+  // toolbar, so here we only need to act on the click.
+  viewport.addEventListener('click', function (e) {
+    var btn = e.target.closest ? e.target.closest('.card-toolbar button') : null;
+    if (!btn) return;
+    e.preventDefault();
+    e.stopPropagation();
+    var cardEl = btn.closest('.card');
+    if (!cardEl) return;
+    var card = CardPhysics.findCard(world, cardEl.dataset.id);
+    if (!card) return;
+    var act = btn.dataset.act;
+    if (act === 'edit') {
+      startEdit(card);
+    } else if (act === 'add') {
+      // Grow a child to the right of this card; it lands pinned where we put
+      // it and opens straight into edit mode.
+      var off = (card.domW || 250) / 2 + 180;
+      createCard({ x: card.x + off, y: card.y }, card.id);
+    } else if (act === 'del') {
+      deleteCard(card.id);
+    }
   });
 
   viewport.addEventListener('keydown', function (e) {
@@ -1018,6 +1072,50 @@
       reparented: reparented,
       reparentByDrop: reparentByDrop,
       cycleBlocked: cycleBlocked
+    };
+  };
+
+  // ---- toolbar check hook --------------------------------------------------
+  // Verifies the hover action bar (edit / add / delete) is present and each
+  // button does what it claims. Runs on the sample root, which always
+  // survives the editor check, and restores the card count it found.
+  window.__cardwallToolbarCheck = function () {
+    function click(el) {
+      el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    }
+    var rootEl = document.querySelector('.card[data-id="root"]') || document.querySelector('.card');
+    if (!rootEl) return { ok: false, reason: 'no card' };
+    var rootId = rootEl.dataset.id;
+    var bar = rootEl.querySelector('.card-toolbar');
+    var btns = bar ? bar.querySelectorAll('button') : [];
+    var hasBar = !!bar && btns.length === 3;
+
+    // edit button -> enters edit mode on the same card
+    if (editingId) cancelEdit();
+    click(bar.querySelector('[data-act="edit"]'));
+    var editOk = editingId === rootId;
+    cancelEdit();
+
+    // add button -> creates a child of this card, opened in edit mode
+    var idsBefore = world.cards.map(function (c) { return c.id; });
+    click(bar.querySelector('[data-act="add"]'));
+    var newId = world.cards.map(function (c) { return c.id; })
+      .filter(function (id) { return idsBefore.indexOf(id) < 0; })[0];
+    var addOk = !!newId && CardPhysics.findCard(world, newId).parent === rootId;
+    cancelEdit(); // createCard opened the new card for typing
+
+    // delete button on the new child -> removes it, count returns
+    var childEl = cardEls.get(newId);
+    click(childEl.querySelector('.card-toolbar [data-act="del"]'));
+    var delOk = !!childEl && world.cards.length === idsBefore.length &&
+      !cardEls.has(newId) && !edgeEls.has(newId);
+
+    return {
+      ok: hasBar && editOk && addOk && delOk,
+      hasBar: hasBar,
+      editOk: editOk,
+      addOk: addOk,
+      delOk: delOk
     };
   };
 })();

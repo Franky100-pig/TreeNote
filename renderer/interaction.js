@@ -54,7 +54,9 @@
     viewport.addEventListener('pointerdown', function (e) {
       if (e.button !== 0) return; // primary button only
       // Cards in edit mode own their pointer: text selection, not dragging.
-      if (e.target.closest && e.target.closest('.card.editing')) return;
+      // The hover toolbar's buttons must also decline to drag/pan — they
+      // have their own click handler.
+      if (e.target.closest && e.target.closest('.card.editing, .card-toolbar')) return;
       onUserInteract(); // user takes over the camera
       try { viewport.setPointerCapture(e.pointerId); } catch (err) { /* synthetic pointer */ }
       var cardEl = e.target.closest ? e.target.closest('.card') : null;

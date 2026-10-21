@@ -211,6 +211,11 @@ function createWindow() {
         const okEditor = !!editor && editor.ok;
         console.log('[smoke] editor-check:', JSON.stringify(editor), okEditor ? 'PASS' : 'FAIL');
         if (!okEditor) { app.exit(1); return; }
+        // Hover action bar: edit / add / delete buttons present and functional.
+        const toolbar = await win.webContents.executeJavaScript('window.__cardwallToolbarCheck()');
+        const okToolbar = !!toolbar && toolbar.ok;
+        console.log('[smoke] toolbar-check:', JSON.stringify(toolbar), okToolbar ? 'PASS' : 'FAIL');
+        if (!okToolbar) { app.exit(1); return; }
         // Vault round trip: save over IPC, then verify the file on disk.
         const save = await win.webContents.executeJavaScript('window.__cardwallSaveNow()');
         const onDisk = fs.existsSync(BOARD_FILE) ? JSON.parse(fs.readFileSync(BOARD_FILE, 'utf8')) : null;

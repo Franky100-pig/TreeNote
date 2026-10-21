@@ -248,18 +248,21 @@
     //    releasing them rejoins the float immediately.
     for (var w = 0; w < n; w++) {
       var wc = cards[w];
-      if (wc.pinned || wc.dragging) { wc.awake = true; wc.still = 0; continue; }
+      if (wc.pinned || wc.dragging || wc.hover) { wc.awake = true; wc.still = 0; continue; }
       if (!wc.awake && (wc.fx * wc.fx + wc.fy * wc.fy) > cfg.sleepForce * cfg.sleepForce) {
         wc.awake = true;
         wc.still = 0;
       }
     }
 
-    // 6. semi-implicit Euler integration (dragged, pinned and sleeping cards
-    //    are positioned externally or intentionally still)
+    // 6. semi-implicit Euler integration (dragged, pinned, hovered and
+    //    sleeping cards are positioned externally or intentionally still).
+    //    `hover` is the UI's "freeze this card while the pointer is over it"
+    //    flag: it keeps the hover toolbar rock-steady on an otherwise
+    //    floating card, without persisting a pin.
     for (var k = 0; k < n; k++) {
       var q = cards[k];
-      if (q.dragging || q.pinned || !q.awake) { q.vx = 0; q.vy = 0; continue; }
+      if (q.dragging || q.pinned || q.hover || !q.awake) { q.vx = 0; q.vy = 0; continue; }
       q.vx = (q.vx + q.fx * dt) * cfg.damping;
       q.vy = (q.vy + q.fy * dt) * cfg.damping;
       var sp = Math.sqrt(q.vx * q.vx + q.vy * q.vy);
@@ -275,7 +278,7 @@
     //    force) and the card stops integrating — the arrangement holds.
     for (var s = 0; s < n; s++) {
       var sc = cards[s];
-      if (sc.pinned || sc.dragging || !sc.awake) continue;
+      if (sc.pinned || sc.dragging || sc.hover || !sc.awake) continue;
       var v2 = sc.vx * sc.vx + sc.vy * sc.vy;
       var f2 = sc.fx * sc.fx + sc.fy * sc.fy;
       if (v2 < cfg.sleepSpeed * cfg.sleepSpeed && f2 < cfg.sleepForce * cfg.sleepForce) {
