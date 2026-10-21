@@ -290,3 +290,249 @@ body {
   white-space: pre-wrap;
   word-break: break-word;
 }
+
+/* ---- toolbar: home + board name ---------------------------------------- */
+/* #toolbar is pointer-events:none so the canvas stays draggable under it;
+   the controls opt back in. */
+#home-btn,
+#board-name {
+  pointer-events: auto;
+  font: inherit;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+#home-btn {
+  width: 26px;
+  height: 26px;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#home-btn:hover,
+#board-name:hover {
+  color: var(--ink);
+  border-color: var(--surface-border);
+  background: var(--surface);
+}
+
+#board-name {
+  font-size: 13px;
+  font-weight: 600;
+  padding: 3px 8px;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- home: the board library ------------------------------------------- */
+#home {
+  position: absolute;
+  inset: 44px 0 0 0; /* below the toolbar, so the back arrow stays reachable */
+  z-index: 20;
+  background: var(--bg);
+  overflow: auto;
+  padding: 28px 32px 48px;
+}
+#home:not([hidden]) { display: block; }
+
+.home-inner {
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+.home-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 22px;
+}
+
+.home-head h1 {
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+}
+
+.home-sub {
+  margin-top: 5px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+#new-board {
+  flex: none;
+  font: inherit;
+  font-size: 13px;
+  color: var(--accent-strong);
+  background: transparent;
+  border: 1px solid var(--accent-soft-ring);
+  border-radius: 8px;
+  padding: 7px 13px;
+  cursor: pointer;
+}
+
+#new-board:hover {
+  background: var(--accent-soft-ring);
+  color: var(--ink);
+}
+
+#board-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.home-card {
+  position: relative;
+  padding: 14px 14px 40px;
+  background: var(--surface);
+  border: 1px solid var(--surface-border);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: border-color 120ms ease, transform 120ms ease;
+}
+
+.home-card:hover {
+  border-color: var(--accent-soft-ring);
+  transform: translateY(-1px);
+}
+
+.home-card.current {
+  border-color: var(--accent-strong-ring);
+  box-shadow: 0 0 0 1px var(--accent-soft-ring);
+}
+
+.home-card-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.home-card-meta {
+  margin-top: 5px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.home-card-actions {
+  position: absolute;
+  left: 14px;
+  bottom: 10px;
+  display: flex;
+  gap: 6px;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.home-card:hover .home-card-actions,
+.home-card.current .home-card-actions {
+  opacity: 1;
+}
+
+.home-card-actions button {
+  font: inherit;
+  font-size: 11px;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--surface-border);
+  border-radius: 6px;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+
+.home-card-actions button:hover {
+  color: var(--ink);
+  border-color: var(--accent-soft-ring);
+}
+
+.home-empty {
+  margin-top: 28px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* ---- dialog ------------------------------------------------------------ */
+#dialog {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  background: rgba(0, 0, 0, 0.45);
+  align-items: center;
+  justify-content: center;
+}
+#dialog:not([hidden]) { display: flex; }
+
+.dialog-inner {
+  width: 330px;
+  padding: 18px;
+  background: var(--surface);
+  border: 1px solid var(--surface-border);
+  border-radius: 12px;
+  box-shadow: 0 18px 50px var(--shadow-lift);
+}
+
+#dialog-label {
+  display: block;
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+
+#dialog-input {
+  width: 100%;
+  font: inherit;
+  font-size: 14px;
+  color: var(--ink);
+  background: var(--bg);
+  border: 1px solid var(--surface-border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  outline: none;
+}
+
+#dialog-input:focus {
+  border-color: var(--accent-strong-ring);
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.dialog-actions button {
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 14px;
+  border-radius: 7px;
+  cursor: pointer;
+  border: 1px solid var(--surface-border);
+  background: transparent;
+  color: var(--muted);
+}
+
+.dialog-actions button:hover { color: var(--ink); }
+
+#dialog-ok {
+  border-color: var(--accent-soft-ring);
+  color: var(--accent-strong);
+}
+
+#dialog-ok:hover {
+  background: var(--accent-soft-ring);
+  color: var(--ink);
+}

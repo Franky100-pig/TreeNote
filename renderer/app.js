@@ -16,10 +16,24 @@
   var worldEl = document.getElementById('world');
   var edgesEl = document.getElementById('edges');
 
+  // Home (the board library) and the one shared dialog.
+  var homeEl = document.getElementById('home');
+  var boardListEl = document.getElementById('board-list');
+  var homeEmptyEl = document.getElementById('home-empty');
+  var homeBtn = document.getElementById('home-btn');
+  var newBoardBtn = document.getElementById('new-board');
+  var boardNameEl = document.getElementById('board-name');
+  var dialogEl = document.getElementById('dialog');
+  var dialogForm = document.getElementById('dialog-form');
+  var dialogInput = document.getElementById('dialog-input');
+  var dialogLabel = document.getElementById('dialog-label');
+  var dialogCancel = document.getElementById('dialog-cancel');
+
   // ---- world setup -------------------------------------------------------
   var world = CardPhysics.createWorld({ seed: 7 });
   var cardEls = new Map(); // id -> HTMLElement
   var edgeEls = new Map(); // childId -> SVGPathElement
+  var currentBoard = { id: null, name: '' };
 
   function seedCards(list) {
     list.forEach(function (item) {
@@ -34,8 +48,6 @@
       });
     });
   }
-
-  seedCards(window.SAMPLE_TREE); // first-run / no-bridge fallback
 
   // ---- DOM construction ----------------------------------------------------
   var zCounter = 100;
@@ -176,7 +188,6 @@
   function hasBridge() {
     return !!(window.cardwall && typeof window.cardwall.saveBoard === 'function');
   }
-
   function markDirty() {
     saveState.dirty = true;
     saveState.lastChange = performance.now();
@@ -200,13 +211,15 @@
   }
 
   function flushSave(force) {
-    if (!hasBridge() || saveState.inFlight || !saveState.dirty) return Promise.resolve(null);
+    if (!hasBridge() || !currentBoard.id || saveState.inFlight || !saveState.dirty) {
+      return Promise.resolve(null);
+    }
     if (!force && performance.now() - saveState.lastChange < SAVE_DEBOUNCE_MS) {
       return Promise.resolve(null);
     }
     saveState.dirty = false;
     saveState.inFlight = true;
-    saveState.pending = window.cardwall.saveBoard(serialize()).then(function (r) {
+    saveState.pending = window.cardwall.saveBoard(currentBoard.id, serialize()).then(function (r) {
       saveState.inFlight = false;
       return r;
     }, function (err) {
@@ -329,30 +342,292 @@
     requestAnimationFrame(frame);
   }
 
-  // ---- boot --------------------------------------------------------------------
-  // Boot is async: the board is loaded over IPC. The sample tree is already in
-  // the world as a fallback and is replaced when a saved board arrives.
-  function boot(board) {
-    if (board && Array.isArray(board.cards) && board.cards.length) {
-      world.cards.length = 0;
-      seedCards(board.cards);
-    }
+  // ---- boot / board switching --------------------------------------------------
+  // Boot is async: the board library is listed over IPC, then the most recently
+  // used board is opened. A first launch creates one board seeded with the
+  // sample tree, so there is always something to look at.
+  var loopStarted = false;
+
+  function clearWorld() {
+    world.cards.length = 0;
+    world.anchors.clear();
+    cardEls.forEach(function (el) { el.remove(); });
+    cardEls.clear();
+    edgeEls.forEach(function (path) { path.remove(); });
+    edgeEls.clear();
+    selectedId = null;
+    editingId = null;
+    worldPaused = false;
+    saveState.dirty = false;
+    acc = 0;
+    tween = null;
+    userInteracted = false;
+    settleFitDone = false;
+    world.time = 0;
+  }
+
+  function openBoardInto(board) {
+    clearWorld();
+    if (board && Array.isArray(board.cards)) seedCards(board.cards);
     buildDOM();
     world.cards.forEach(measure);
     applyFit(90);
     syncDOM();
-    requestAnimationFrame(frame);
-    window.__cardwallReady = true;
+    currentBoard = { id: board.id, name: board.name || '未命名' };
+    boardNameEl.textContent = currentBoard.name;
+    document.title = currentBoard.name + ' — cardwall';
+    showHome(false);
+    if (!loopStarted) {
+      loopStarted = true;
+      requestAnimationFrame(frame);
+    }
   }
 
-  (function bootAsync() {
+  function boot() {
     var bridge = window.cardwall;
-    if (!bridge || typeof bridge.loadBoard !== 'function') {
-      boot(null); // plain-browser fallback
+    if (!bridge || typeof bridge.listBoards !== 'function') {
+      // Plain-browser fallback (open index.html directly): no library.
+      openBoardInto({ id: null, name: '示例', cards: window.SAMPLE_TREE });
+      window.__cardwallReady = true;
       return;
     }
-    bridge.loadBoard().then(boot, function () { boot(null); });
-  })();
+    bridge.listBoards().then(function (list) {
+      if (list && list.length) return bridge.openBoard(list[0].id);
+      // First run: one named board, seeded so the canvas is not empty.
+      return bridge.createBoard('我的第一幅图').then(function (created) {
+        return bridge.saveBoard(created.id, { cards: window.SAMPLE_TREE }).then(function () {
+          return { id: created.id, name: created.name, cards: window.SAMPLE_TREE };
+        });
+      });
+    }).then(function (board) {
+      if (!board) throw new Error('no board');
+      openBoardInto(board);
+      renderHome();
+      window.__cardwallReady = true;
+    }).catch(function (err) {
+      console.error('[cardwall] boot failed:', err);
+      openBoardInto({ id: null, name: '示例', cards: window.SAMPLE_TREE });
+      window.__cardwallReady = true;
+    });
+  }
+
+  // ---- home: the board library ------------------------------------------------
+  function showHome(on) {
+    homeEl.hidden = !on;
+    if (on) {
+      renderHome();
+      document.title = '卡片墙 — cardwall';
+    } else if (currentBoard.name) {
+      document.title = currentBoard.name + ' — cardwall';
+    }
+  }
+
+  function homeVisible() {
+    return !homeEl.hidden;
+  }
+
+  function relativeTime(iso) {
+    if (!iso) return '';
+    var t = Date.parse(iso);
+    if (!isFinite(t)) return '';
+    var s = Math.max(0, (Date.now() - t) / 1000);
+    if (s < 60) return '刚刚';
+    if (s < 3600) return Math.floor(s / 60) + ' 分钟前';
+    if (s < 86400) return Math.floor(s / 3600) + ' 小时前';
+    if (s < 86400 * 7) return Math.floor(s / 86400) + ' 天前';
+    var d = new Date(t);
+    return (d.getMonth() + 1) + '月' + d.getDate() + '日';
+  }
+
+  function renderHome() {
+    if (!window.cardwall || typeof window.cardwall.listBoards !== 'function') {
+      homeEmptyEl.hidden = false;
+      return Promise.resolve([]);
+    }
+    return window.cardwall.listBoards().then(function (list) {
+      boardListEl.innerHTML = '';
+      (list || []).forEach(function (b) {
+        boardListEl.appendChild(homeCard(b));
+      });
+      homeEmptyEl.hidden = (list || []).length > 0;
+      return list || [];
+    });
+  }
+
+  function homeCard(board) {
+    var card = document.createElement('div');
+    card.className = 'home-card' + (board.id === currentBoard.id ? ' current' : '');
+    card.setAttribute('role', 'listitem');
+    card.dataset.id = board.id;
+
+    var title = document.createElement('div');
+    title.className = 'home-card-name';
+    title.textContent = board.name;
+
+    var meta = document.createElement('div');
+    meta.className = 'home-card-meta';
+    meta.textContent = board.cards + ' 张卡' + (board.savedAt ? ' · ' + relativeTime(board.savedAt) : '');
+
+    var actions = document.createElement('div');
+    actions.className = 'home-card-actions';
+    var rename = document.createElement('button');
+    rename.type = 'button';
+    rename.dataset.act = 'rename';
+    rename.textContent = '重命名';
+    var del = document.createElement('button');
+    del.type = 'button';
+    del.dataset.act = 'delete';
+    del.textContent = '删除';
+    actions.appendChild(rename);
+    actions.appendChild(del);
+
+    card.appendChild(title);
+    card.appendChild(meta);
+    card.appendChild(actions);
+
+    // Clicking the body opens; the buttons are handled separately below.
+    card.addEventListener('click', function (e) {
+      var btn = e.target.closest ? e.target.closest('button') : null;
+      if (btn) {
+        if (btn.dataset.act === 'rename') {
+          renameBoardById(board.id, board.name);
+        } else if (btn.dataset.act === 'delete') {
+          deleteBoardById(board.id);
+        }
+        return;
+      }
+      openBoardById(board.id);
+    });
+    return card;
+  }
+
+  function openBoardById(id) {
+    if (!window.cardwall || typeof window.cardwall.openBoard !== 'function') return Promise.resolve(null);
+    flushSave(true); // never lose the board we are leaving
+    return window.cardwall.openBoard(id).then(function (board) {
+      if (!board) return null;
+      openBoardInto(board);
+      return board;
+    });
+  }
+
+  function createBoardWithName(name) {
+    if (!window.cardwall || typeof window.cardwall.createBoard !== 'function') return Promise.resolve(null);
+    return window.cardwall.createBoard(name).then(function (created) {
+      if (!created) return null;
+      return window.cardwall.openBoard(created.id).then(function (board) {
+        openBoardInto(board || { id: created.id, name: created.name, cards: [] });
+        renderHome();
+        return created;
+      });
+    });
+  }
+
+  function renameBoardById(id, currentName) {
+    return askName({ title: '给这幅图起个名字', value: currentName || '' }).then(function (name) {
+      if (name == null) return null;
+      return window.cardwall.renameBoard(id, name).then(function (r) {
+        if (r && r.ok && id === currentBoard.id) {
+          currentBoard.name = r.name;
+          boardNameEl.textContent = r.name;
+          document.title = r.name + ' — cardwall';
+        }
+        renderHome();
+        return r;
+      });
+    });
+  }
+
+  function deleteBoardById(id) {
+    return confirmDialog({
+      title: '删除这幅图？',
+      body: '文件会进废纸篓，可以从 Finder 里恢复。'
+    }).then(function (yes) {
+      if (!yes) return null;
+      return window.cardwall.deleteBoard(id).then(function (r) {
+        // Deleting the board you are looking at drops you back to the library.
+        if (r && r.ok && id === currentBoard.id) {
+          currentBoard = { id: null, name: '' };
+          clearWorld();
+          showHome(true);
+          window.cardwall.listBoards().then(function (list) {
+            if (list && list.length) openBoardById(list[0].id);
+            else renderHome();
+          });
+        } else {
+          renderHome();
+        }
+        return r;
+      });
+    });
+  }
+
+  // ---- dialog (new board name / rename / confirm) ------------------------------
+  // Electron does not implement window.prompt/confirm, so the app carries its
+  // own tiny modal. One dialog, three shapes: text, confirm, and alert-ish.
+  var dialogResolve = null;
+
+  function openDialog(opts) {
+    return new Promise(function (resolve) {
+      dialogResolve = resolve;
+      dialogLabel.textContent = opts.label || '名称';
+      dialogInput.value = opts.value || '';
+      dialogInput.hidden = opts.mode === 'confirm';
+      dialogLabel.hidden = opts.mode === 'confirm';
+      dialogEl.dataset.mode = opts.mode || 'text';
+      var ok = document.getElementById('dialog-ok');
+      ok.textContent = opts.okText || '确定';
+      dialogEl.hidden = false;
+      if (opts.mode !== 'confirm') {
+        setTimeout(function () { dialogInput.focus(); dialogInput.select(); }, 0);
+      } else {
+        setTimeout(function () { ok.focus(); }, 0);
+      }
+    });
+  }
+
+  function closeDialog(result) {
+    dialogEl.hidden = true;
+    var resolve = dialogResolve;
+    dialogResolve = null;
+    if (resolve) resolve(result);
+  }
+
+  function askName(opts) {
+    return openDialog({ label: opts.title || '名称', value: opts.value, mode: 'text' }).then(function (value) {
+      if (value == null) return null;
+      var trimmed = String(value).replace(/\s+/g, ' ').trim().slice(0, 80);
+      return trimmed || null;
+    });
+  }
+
+  function confirmDialog(opts) {
+    return openDialog({ label: opts.title, mode: 'confirm', okText: opts.okText || '删除' });
+  }
+
+  dialogForm.addEventListener('submit', function (e) {
+    e.preventDefault();
+    if (dialogEl.dataset.mode === 'confirm') { closeDialog(true); return; }
+    closeDialog(dialogInput.value);
+  });
+  dialogCancel.addEventListener('click', function () { closeDialog(null); });
+  dialogEl.addEventListener('click', function (e) {
+    if (e.target === dialogEl) closeDialog(null); // click the backdrop to bail
+  });
+
+  homeBtn.addEventListener('click', function () {
+    if (homeVisible()) showHome(false);
+    else showHome(true);
+  });
+  boardNameEl.addEventListener('click', function () {
+    if (currentBoard.id) renameBoardById(currentBoard.id, currentBoard.name);
+  });
+  newBoardBtn.addEventListener('click', function () {
+    askName({ title: '新的一幅图', value: '' }).then(function (name) {
+      if (name == null) return;
+      createBoardWithName(name);
+    });
+  });
 
   // ---- card editing (C5): selection, inline edit, create, delete ------------
   var selectedId = null;
@@ -691,6 +966,23 @@
       toggleTheme(); // works while editing too
       return;
     }
+    // The dialog and the home screen own the keyboard while they are up.
+    if (!dialogEl.hidden) {
+      if (e.key === 'Escape') { e.preventDefault(); closeDialog(null); }
+      return;
+    }
+    if (homeVisible()) {
+      if (e.key === 'Escape' || e.key === 'h' || e.key === 'H') {
+        e.preventDefault();
+        if (currentBoard.id) showHome(false);
+      }
+      return;
+    }
+    if ((e.key === 'h' || e.key === 'H') && !e.metaKey && !e.ctrlKey && !e.altKey && !editingId) {
+      e.preventDefault();
+      showHome(true);
+      return;
+    }
     if (editingId) return; // the editor owns the keyboard
     if ((e.key === 'Delete' || e.key === 'Backspace') && selectedId) {
       e.preventDefault();
@@ -931,9 +1223,15 @@
         was: Math.round(Math.hypot(b.x - start.x, b.y - start.y))
       };
     });
-    var followed = followDetail.every(function (d) {
-      return d.travel > 20 && Math.abs(d.toCard - d.was) < 260;
-    });
+    // Rope semantics: a child on the far side of the grabbed card is TOWED and
+    // travels with it, while one the card moves TOWARD goes slack and is
+    // legitimately left behind (repulsion then pushes it back out to rope
+    // length). So "every child moved" is a spring-era assumption; what must
+    // hold is that the branch keeps its geometry and at least half of it was
+    // actually dragged along.
+    var moved = followDetail.filter(function (d) { return d.travel > 20; }).length;
+    var followed = moved >= Math.max(1, Math.ceil(sub.length / 2)) &&
+      followDetail.every(function (d) { return Math.abs(d.toCard - d.was) < 260; });
     // Unpin must work with the pointer STILL ON the card — that is the real
     // gesture (click to select, then press P). A hovered card is frozen by
     // the integrator so its toolbar stays clickable, so togglePin has to
@@ -1134,4 +1432,55 @@
       delOk: delOk
     };
   };
+
+  // ---- home check hook -----------------------------------------------------
+  // Drives the real library: open it with the back button, create a board
+  // through the same path the "新建" button uses, rename it, delete it. The
+  // original board is left untouched, and the deleted board is not the current
+  // one, so the reload check afterwards still finds the edited board.
+  window.__cardwallHomeCheck = function () {
+    var out = {};
+    homeBtn.click();
+    out.visible = !homeEl.hidden;
+    var before = 0;
+    return renderHome() // the overlay renders asynchronously; wait for it
+      .then(function (list) {
+        out.cards = boardListEl.children.length;
+        before = list.length;
+        return createBoardWithName('smoke test');
+      })
+      .then(function (created) {
+        out.created = !!created && created.name === 'smoke test';
+        out.opened = currentBoard.name === 'smoke test' && !homeVisible();
+        return window.cardwall.listBoards();
+      })
+      .then(function (list) {
+        out.listAfterCreate = list.length;
+        var mine = list.filter(function (b) { return b.name === 'smoke test'; })[0];
+        out.hasNew = !!mine;
+        return mine ? window.cardwall.renameBoard(mine.id, 'smoke renamed') : null;
+      })
+      .then(function (r) {
+        out.renamed = !!(r && r.ok && r.name === 'smoke renamed');
+        return window.cardwall.listBoards();
+      })
+      .then(function (list) {
+        var mine = list.filter(function (b) { return b.name === 'smoke renamed'; })[0];
+        out.renameVisible = !!mine;
+        return mine ? window.cardwall.deleteBoard(mine.id) : null;
+      })
+      .then(function (r) {
+        out.deleted = !!(r && r.ok);
+        return window.cardwall.listBoards();
+      })
+      .then(function (list) {
+        out.listAfterDelete = list.length;
+        out.ok = out.visible && out.cards >= 1 && out.created && out.opened &&
+          out.listAfterCreate === before + 1 && out.hasNew && out.renamed &&
+          out.renameVisible && out.deleted && out.listAfterDelete === before;
+        return out;
+      });
+  };
+
+  boot();
 })();

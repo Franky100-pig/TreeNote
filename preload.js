@@ -1,9 +1,13 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
-// Renderer <-> main bridge. The renderer never touches the filesystem; it
-// only asks the main process to load or save the board.
+// Renderer <-> main bridge. The renderer never touches the filesystem; it only
+// asks the main process about the board library and the current board.
 contextBridge.exposeInMainWorld('cardwall', {
   platform: process.platform,
-  loadBoard: () => ipcRenderer.invoke('board:load'),
-  saveBoard: (board) => ipcRenderer.invoke('board:save', board)
+  listBoards: () => ipcRenderer.invoke('boards:list'),
+  createBoard: (name) => ipcRenderer.invoke('boards:create', name),
+  openBoard: (id) => ipcRenderer.invoke('boards:open', id),
+  saveBoard: (id, board) => ipcRenderer.invoke('boards:save', id, board),
+  renameBoard: (id, name) => ipcRenderer.invoke('boards:rename', id, name),
+  deleteBoard: (id) => ipcRenderer.invoke('boards:delete', id)
 });

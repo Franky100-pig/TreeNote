@@ -10,8 +10,10 @@
 <body>
   <div id="app">
     <header id="toolbar">
+      <button id="home-btn" type="button" title="首页：所有卡片墙 (H)" aria-label="返回首页">←</button>
       <span class="brand">cardwall</span>
-      <span class="hint">拖动即定住 · P 重新漂浮 · 双击编辑 · 双击空白新建 · 拖到卡片上改挂 · Delete 删除 · 滚轮缩放 · 拖空白平移 · ⌘⇧L 主题</span>
+      <button id="board-name" type="button" title="重命名这幅图">未命名</button>
+      <span class="hint">拖动即定住 · P 重新漂浮 · 双击编辑 · 双击空白新建 · 拖到卡片上改挂 · Delete 删除 · 滚轮缩放 · 拖空白平移 · ⌘⇧L 主题 · H 首页</span>
     </header>
     <div id="viewport">
       <div id="world">
@@ -20,6 +22,34 @@
       </div>
     </div>
     <div id="debug-panel"></div>
+
+    <!-- Home: the board library. Every wall is a named file; this is the
+         launcher you land on when you press H or the back arrow. -->
+    <section id="home" hidden>
+      <div class="home-inner">
+        <header class="home-head">
+          <div>
+            <h1>卡片墙</h1>
+            <p class="home-sub">每幅图是独立的一棵树，命名后随时打开</p>
+          </div>
+          <button id="new-board" type="button">＋ 新建一幅</button>
+        </header>
+        <div id="board-list" role="list"></div>
+        <p id="home-empty" class="home-empty" hidden>还没有任何图，先新建一幅</p>
+      </div>
+    </section>
+
+    <!-- One small dialog, reused for "new board" and "rename". -->
+    <div id="dialog" hidden>
+      <form id="dialog-form" class="dialog-inner">
+        <label id="dialog-label" for="dialog-input">名称</label>
+        <input id="dialog-input" type="text" maxlength="80" autocomplete="off" spellcheck="false">
+        <div class="dialog-actions">
+          <button type="button" id="dialog-cancel">取消</button>
+          <button type="submit" id="dialog-ok">确定</button>
+        </div>
+      </form>
+    </div>
   </div>
   <script src="renderer/physics.js"></script>
   <script src="renderer/sample.js"></script>

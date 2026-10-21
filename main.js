@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -18,15 +18,20 @@ if (isSmoke) {
   app.disableHardwareAcceleration();
 }
 
-// ---- vault (C6) -------------------------------------------------------------
-// One board file under the app's userData directory. CARDWALL_VAULT_DIR
-// overrides it; smoke runs in a fresh temp dir so runs stay hermetic.
+// ---- vault (C6, multi-board in 0.4) ----------------------------------------
+// A board is one JSON file under <vault>/boards/. The board's NAME lives
+// inside its own file, so the library is just "read the directory" — there is
+// no index file that can drift out of sync with reality.
+// CARDWALL_VAULT_DIR overrides the vault; smoke runs in a fresh temp dir so
+// runs stay hermetic.
 const VAULT_DIR = process.env.CARDWALL_VAULT_DIR
   ? path.resolve(process.env.CARDWALL_VAULT_DIR)
   : isSmoke
     ? fs.mkdtempSync(path.join(os.tmpdir(), 'cardwall-smoke-'))
     : path.join(app.getPath('userData'), 'vault');
-const BOARD_FILE = path.join(VAULT_DIR, 'board.json');
+const BOARDS_DIR = path.join(VAULT_DIR, 'boards');
+// 0.3 stored a single board here; it is imported once on first launch.
+const LEGACY_BOARD_FILE = path.join(VAULT_DIR, 'board.json');
 // The packaged app's __dirname lives inside a read-only asar, so the smoke
 // screenshot goes to the temp dir there; in dev it lands next to main.js.
 const SMOKE_SHOT = app.isPackaged
@@ -35,6 +40,8 @@ const SMOKE_SHOT = app.isPackaged
 const MAX_CARDS = 5000;
 const MAX_TITLE = 500;
 const MAX_NOTE = 20000;
+const MAX_NAME = 80;
+const DEFAULT_NAME = '我的第一幅图';
 
 // capturePage can return a frame the compositor has not painted yet, which
 // comes back as a blank canvas. Swapping the theme made this reproducible
@@ -72,20 +79,32 @@ async function capturePainted(win, minInk) {
   return null;
 }
 
-
-function readBoard() {
-  try {
-    const data = JSON.parse(fs.readFileSync(BOARD_FILE, 'utf8'));
-    if (!data || !Array.isArray(data.cards)) return null;
-    return data;
-  } catch (err) {
-    if (err.code !== 'ENOENT') console.error('[vault] read failed:', err.message);
-    return null;
-  }
+// ---- board files ------------------------------------------------------------
+// Untrusted input everywhere: a hand-edited or crafted board must never crash
+// the app, escape the boards directory, or bloat memory.
+function safeId(id) {
+  return String(id == null ? '' : id).replace(/[^A-Za-z0-9_-]/g, '').slice(0, 40);
 }
 
-// Untrusted input (the renderer is the only writer, but a hand-edited or
-// crafted board file must never crash or bloat the app).
+function boardPath(id) {
+  const safe = safeId(id);
+  if (!safe) throw new Error('invalid board id');
+  return path.join(BOARDS_DIR, safe + '.json');
+}
+
+function newBoardId() {
+  return 'b' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+}
+
+function cleanName(name) {
+  const s = String(name == null ? '' : name)
+    .replace(/[\u0000-\u001f\u007f]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, MAX_NAME);
+  return s || DEFAULT_NAME;
+}
+
 function sanitizeBoard(data) {
   const raw = data && Array.isArray(data.cards) ? data.cards.slice(0, MAX_CARDS) : [];
   const ids = new Set();
@@ -107,7 +126,7 @@ function sanitizeBoard(data) {
   }
   // Second pass: parents may be declared after their children.
   const byId = new Map(cards.map(c => [c.id, c]));
-  raw.forEach((c, i) => {
+  raw.forEach((c) => {
     if (!c || !byId.has(c.id)) return;
     const parent = typeof c.parent === 'string' ? c.parent : null;
     if (parent && parent !== c.id && byId.has(parent)) byId.get(c.id).parent = parent;
@@ -115,25 +134,137 @@ function sanitizeBoard(data) {
   return { version: 1, cards };
 }
 
+function readBoardFile(id) {
+  try {
+    const data = JSON.parse(fs.readFileSync(boardPath(id), 'utf8'));
+    if (!data || !Array.isArray(data.cards)) return null;
+    return data;
+  } catch (err) {
+    if (err.code !== 'ENOENT') console.error('[vault] read failed:', err.message);
+    return null;
+  }
+}
+
 // Write-then-rename: a crash mid-save leaves the previous board intact.
-function writeBoardAtomic(board) {
-  fs.mkdirSync(VAULT_DIR, { recursive: true });
-  const tmp = BOARD_FILE + '.tmp';
+function writeBoardFile(id, board) {
+  fs.mkdirSync(BOARDS_DIR, { recursive: true });
+  const file = boardPath(id);
+  const tmp = file + '.tmp';
   fs.writeFileSync(tmp, JSON.stringify(board, null, 2), 'utf8');
   try {
-    if (fs.existsSync(BOARD_FILE)) fs.copyFileSync(BOARD_FILE, BOARD_FILE + '.bak');
+    if (fs.existsSync(file)) fs.copyFileSync(file, file + '.bak');
   } catch (err) {
     console.error('[vault] backup failed:', err.message);
   }
-  fs.renameSync(tmp, BOARD_FILE);
+  fs.renameSync(tmp, file);
 }
 
-ipcMain.handle('board:load', () => readBoard());
-ipcMain.handle('board:save', (event, data) => {
+// 0.3 shipped a single vault/board.json with no name. Adopt it as the first
+// board the first time 0.4 starts, so upgrading does not lose the wall.
+function migrateLegacy() {
+  try {
+    if (!fs.existsSync(LEGACY_BOARD_FILE)) return;
+    fs.mkdirSync(BOARDS_DIR, { recursive: true });
+    const existing = fs.readdirSync(BOARDS_DIR).filter(f => f.endsWith('.json'));
+    if (existing.length) return; // already migrated (or a real library exists)
+    const data = JSON.parse(fs.readFileSync(LEGACY_BOARD_FILE, 'utf8'));
+    const clean = sanitizeBoard(data);
+    const id = newBoardId();
+    writeBoardFile(id, {
+      version: 1,
+      name: DEFAULT_NAME,
+      savedAt: data.savedAt || new Date().toISOString(),
+      cards: clean.cards
+    });
+    console.log('[vault] migrated legacy board.json ->', id, '(' + clean.cards.length + ' cards)');
+  } catch (err) {
+    console.error('[vault] migration failed:', err.message);
+  }
+}
+
+function listBoards() {
+  migrateLegacy();
+  let files = [];
+  try {
+    files = fs.readdirSync(BOARDS_DIR).filter(f => f.endsWith('.json') && !f.endsWith('.bak'));
+  } catch (err) {
+    return [];
+  }
+  const out = [];
+  for (const file of files) {
+    const id = file.replace(/\.json$/, '');
+    const board = readBoardFile(id);
+    if (!board) continue;
+    out.push({
+      id: id,
+      name: cleanName(board.name),
+      cards: Array.isArray(board.cards) ? board.cards.length : 0,
+      savedAt: board.savedAt || null
+    });
+  }
+  // Most recently touched first; a board without a stamp sorts last.
+  out.sort((a, b) => String(b.savedAt || '').localeCompare(String(a.savedAt || '')));
+  return out;
+}
+
+ipcMain.handle('boards:list', () => listBoards());
+
+ipcMain.handle('boards:create', (event, name) => {
+  const id = newBoardId();
+  const clean = cleanName(name);
+  writeBoardFile(id, { version: 1, name: clean, savedAt: new Date().toISOString(), cards: [] });
+  return { id: id, name: clean, cards: 0 };
+});
+
+ipcMain.handle('boards:open', (event, id) => {
+  const board = readBoardFile(id);
+  if (!board) return null;
+  return { id: safeId(id), name: cleanName(board.name), cards: sanitizeBoard(board).cards };
+});
+
+ipcMain.handle('boards:save', (event, id, data) => {
+  const safe = safeId(id);
+  if (!safe) return { ok: false, error: 'invalid id' };
   const clean = sanitizeBoard(data);
-  const board = { version: 1, savedAt: new Date().toISOString(), cards: clean.cards };
-  writeBoardAtomic(board);
-  return { ok: true, path: BOARD_FILE, cards: clean.cards.length };
+  // Keep the name that is already on disk: renaming has its own handler, and a
+  // stale renderer must not be able to wipe it.
+  const previous = readBoardFile(safe);
+  const name = cleanName(previous ? previous.name : (data && data.name));
+  writeBoardFile(safe, {
+    version: 1,
+    name: name,
+    savedAt: new Date().toISOString(),
+    cards: clean.cards
+  });
+  return { ok: true, path: boardPath(safe), cards: clean.cards.length, name: name };
+});
+
+ipcMain.handle('boards:rename', (event, id, name) => {
+  const safe = safeId(id);
+  if (!safe) return { ok: false, error: 'invalid id' };
+  const board = readBoardFile(safe);
+  if (!board) return { ok: false, error: 'not found' };
+  const next = cleanName(name);
+  board.name = next;
+  board.savedAt = new Date().toISOString();
+  writeBoardFile(safe, board);
+  return { ok: true, name: next };
+});
+
+// Deleting a board puts the file in the OS trash instead of unlinking it, so a
+// misclick is recoverable from the Finder.
+ipcMain.handle('boards:delete', async (event, id) => {
+  const safe = safeId(id);
+  if (!safe) return { ok: false, error: 'invalid id' };
+  const file = boardPath(safe);
+  if (!fs.existsSync(file)) return { ok: false, error: 'not found' };
+  try {
+    await shell.trashItem(file);
+    try { fs.rmSync(file + '.bak', { force: true }); } catch (err) { /* no backup */ }
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: String(err && err.message || err) };
+  }
 });
 
 function createWindow() {
@@ -158,7 +289,7 @@ function createWindow() {
     // `once`: the load-check reloads the window at the end.
     win.webContents.once('did-finish-load', async () => {
       try {
-        // Boot is async now (it loads the board over IPC); wait for the
+        // Boot is async now (it opens a board over IPC); wait for the
         // renderer to signal readiness before running the checks.
         let ready = false;
         for (let i = 0; i < 150; i++) {
@@ -218,19 +349,36 @@ function createWindow() {
         if (!okToolbar) { app.exit(1); return; }
         // Vault round trip: save over IPC, then verify the file on disk.
         const save = await win.webContents.executeJavaScript('window.__cardwallSaveNow()');
-        const onDisk = fs.existsSync(BOARD_FILE) ? JSON.parse(fs.readFileSync(BOARD_FILE, 'utf8')) : null;
+        const onDisk = save && save.path && fs.existsSync(save.path)
+          ? JSON.parse(fs.readFileSync(save.path, 'utf8'))
+          : null;
         const rootCard = onDisk && onDisk.cards.find((c) => c.title === '已编辑标题');
         const persist = {
           ok: !!save && save.ok && !!onDisk && onDisk.cards.length === 5 &&
-            !!rootCard && !fs.existsSync(BOARD_FILE + '.tmp'),
+            !!rootCard && !fs.existsSync(save.path + '.tmp'),
           saved: save && save.cards,
           diskCards: onDisk ? onDisk.cards.length : null,
           editedTitlePersisted: !!rootCard,
-          tmpLeftOver: fs.existsSync(BOARD_FILE + '.tmp'),
-          path: BOARD_FILE
+          tmpLeftOver: !!(save && save.path) && fs.existsSync(save.path + '.tmp'),
+          path: save && save.path
         };
         console.log('[smoke] persist-check:', JSON.stringify(persist), persist.ok ? 'PASS' : 'FAIL');
         if (!persist.ok) { app.exit(1); return; }
+        // Board library: the list has a name, and create/rename/delete round-trip.
+        const home = await win.webContents.executeJavaScript('window.__cardwallHomeCheck()');
+        const okHome = !!home && home.ok;
+        console.log('[smoke] home-check:', JSON.stringify(home), okHome ? 'PASS' : 'FAIL');
+        if (!okHome) { app.exit(1); return; }
+        // Home screenshot for visual review: the library is a whole new surface
+        // and the only way to catch layout regressions in it.
+        await win.webContents.executeJavaScript('document.getElementById("home-btn").click()');
+        const shotHome = await capturePainted(win);
+        if (shotHome) {
+          const homeShotPath = path.join(path.dirname(SMOKE_SHOT), 'smoke-home.png');
+          fs.writeFileSync(homeShotPath, shotHome.img.toPNG());
+          console.log('[smoke] home screenshot ->', homeShotPath, 'ink', shotHome.ink.toFixed(3));
+        }
+        await win.webContents.executeJavaScript('document.getElementById("home-btn").click()');
         // Load path: reload the window and confirm the board comes back from disk.
         win.webContents.reload();
         let ready2 = false;
