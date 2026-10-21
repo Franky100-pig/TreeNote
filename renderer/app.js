@@ -29,7 +29,8 @@
         y: item.y,
         parent: item.parent || null,
         title: item.title,
-        note: item.note || ''
+        note: item.note || '',
+        pinned: item.pinned
       });
     });
   }
@@ -41,7 +42,7 @@
 
   function buildCardEl(card) {
     var el = document.createElement('div');
-    el.className = 'card' + (card.parent ? '' : ' card-root');
+    el.className = 'card' + (card.parent ? '' : ' card-root') + (card.pinned ? ' pinned' : '');
     el.dataset.id = card.id;
     var title = document.createElement('div');
     title.className = 'card-title';
@@ -165,7 +166,8 @@
           note: c.note,
           x: c.x,
           y: c.y,
-          parent: c.parent || null
+          parent: c.parent || null,
+          pinned: !!c.pinned
         };
       })
     };
@@ -440,6 +442,22 @@
     return false;
   }
 
+  // Every card below `id`, in tree order — a dragged card carries its branch
+  // so the branch keeps the shape you arranged it in.
+  function descendantsOf(id) {
+    var out = [];
+    var frontier = [id];
+    while (frontier.length) {
+      var curId = frontier.pop();
+      world.cards.forEach(function (c) {
+        if (c.parent !== curId) return;
+        out.push(c);
+        frontier.push(c.id);
+      });
+    }
+    return out;
+  }
+
   function reparent(card, targetId) {
     if (!card || !targetId || targetId === card.id) return false;
     if (isAncestor(card.id, targetId)) return false; // would close a cycle
@@ -461,7 +479,8 @@
       y: worldPoint.y,
       parent: parent,
       title: '',
-      note: ''
+      note: '',
+      pinned: true // created where you clicked — it stays there
     });
     var el = buildCardEl(card);
     worldEl.appendChild(el);
@@ -473,6 +492,20 @@
     syncDOM();
     startEdit(card);
     return card;
+  }
+
+  // Pinned = free placement: no snap-back, no drift, no integration. Set by
+  // grabbing a card, flipped back by `P` so a card can rejoin the float.
+  function togglePin(id) {
+    var card = CardPhysics.findCard(world, id);
+    if (!card) return null;
+    card.pinned = !card.pinned;
+    if (card.pinned) { card.vx = 0; card.vy = 0; }
+    var el = cardEls.get(card.id);
+    if (el) el.classList.toggle('pinned', card.pinned);
+    markDirty();
+    syncDOM();
+    return card.pinned;
   }
 
   function deleteCard(id) {
@@ -589,6 +622,9 @@
     if ((e.key === 'Delete' || e.key === 'Backspace') && selectedId) {
       e.preventDefault();
       deleteCard(selectedId);
+    } else if ((e.key === 'p' || e.key === 'P') && selectedId) {
+      e.preventDefault();
+      togglePin(selectedId);
     } else if (e.key === 'Escape' && selectedId) {
       select(null);
     }
@@ -740,6 +776,7 @@
     onCardPlaced: markDirty,
     onCardDropped: reparent,
     cardAt: cardAt,
+    descendants: descendantsOf,
     raise: raise,
     findCard: function (id) { return CardPhysics.findCard(world, id); }
   });
@@ -781,28 +818,47 @@
       scaleBefore: before.scale, scaleAfter: after.scale
     };
 
-    // 3. card drag: grab the first card, move +80px, release with velocity
-    // Synthetic events land in the same task, so spin a few real milliseconds
-    // between them — the release velocity needs a measurable dt (>5ms).
-    function spin(ms) {
-      var t0 = performance.now();
-      while (performance.now() - t0 < ms) { /* busy wait: real clock time */ }
-    }
+    // 3. card drag: grab the first card, move +80px, release.
+    //    Free placement: the card pins on grab, keeps the drop position
+    //    exactly (no spring, no inertia), carries its branch rigidly, and
+    //    rejoins the float when unpinned.
     var cardEl = document.querySelector('.card');
     var card = CardPhysics.findCard(world, cardEl.dataset.id);
+    var sub = descendantsOf(card.id);
+    var before = [card].concat(sub).map(function (c) { return { c: c, x: c.x, y: c.y }; });
     var rect = cardEl.getBoundingClientRect();
     var cx = rect.left + rect.width / 2, cy = rect.top + rect.height / 2;
     var start = { x: card.x, y: card.y };
     fire('pointerdown', cardEl, cx, cy);
-    spin(12);
     fire('pointermove', cardEl, cx + 40, cy);
-    spin(12);
     fire('pointermove', cardEl, cx + 80, cy);
-    spin(12);
     fire('pointerup', cardEl, cx + 80, cy);
+    var dropped = { x: card.x, y: card.y };
+    var movedBy = card.x - start.x; // 80 screen px expressed in world units
+    // Branch moves as one piece: same delta, no relative slip.
+    var rigid = sub.every(function (s) {
+      var b = before.filter(function (e) { return e.c === s; })[0];
+      return Math.abs((s.x - b.x) - movedBy) < 1e-6 && Math.abs(s.y - b.y) < 1e-6;
+    });
+    // 240 physics steps with drift on: a pinned card must not budge by an
+    // epsilon, let alone drift back toward its anchor.
+    for (var s1 = 0; s1 < 240; s1++) CardPhysics.step(world);
+    var heldStill = Math.abs(card.x - dropped.x) < 1e-9 && Math.abs(card.y - dropped.y) < 1e-9;
+    // Unpin: it rejoins the float and the snap spring pulls it home again.
+    var pinNow = togglePin(card.id);
+    for (var s2 = 0; s2 < 60; s2++) CardPhysics.step(world);
+    var floatsAgain = Math.hypot(card.x - dropped.x, card.y - dropped.y) > 1;
+    // Restore the whole branch and leave the grabbed card pinned+placed, so
+    // later checks and the persisted board see a deterministic layout.
+    before.forEach(function (e) { e.c.x = e.x; e.c.y = e.y; });
+    card.vx = 0;
+    card.vy = 0;
+    togglePin(card.id);
     var drag = {
-      ok: !card.dragging && card.x > start.x + 60 && card.vx > 0,
-      moved: card.x - start.x, vx: card.vx, dragging: card.dragging
+      ok: !card.dragging && movedBy > 60 && card.pinned && card.vx === 0 &&
+        heldStill && rigid && pinNow === false && floatsAgain,
+      moved: movedBy, vx: card.vx, dragging: card.dragging, branch: sub.length,
+      pinned: card.pinned, heldStill: heldStill, rigid: rigid, floatsAgain: floatsAgain
     };
 
     // 4. clamp: wheel all the way out then all the way in stays in range

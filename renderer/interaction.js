@@ -1,5 +1,5 @@
 /**
- * cardwall interaction layer (C4): pan, zoom, card drag with inertia.
+ * cardwall interaction layer: pan, zoom, card drag.
  *
  * - Pan: drag the empty viewport.
  * - Zoom: wheel, anchored at the cursor. With screen = scale*world + pan,
@@ -8,11 +8,12 @@
  *   (derived from a = s*w + pan; verified by the fixed-point check —
  *   the cursor's world coordinate is invariant across the zoom).
  * - Card drag: pointer capture; position written in world coordinates.
- *   Release velocity comes from a short sample window, after which the
- *   physics integrator carries the inertia and the snap spring pulls the
- *   card back to its ring anchor.
+ *   Grabbing a card pins it, so the drop lands exactly where you let go —
+ *   no release inertia, no spring pulling it home. Obsidian behaves this
+ *   way and it is what "free placement" means: the auto-layout may suggest
+ *   a spot, but once you touch a card the spot is yours. `P` unpins.
  *
- * Not in C4: pinch-zoom, shift axis lock, alt-duplicate, auto-pan near
+ * Not implemented: pinch-zoom, shift axis lock, alt-duplicate, auto-pan near
  * edges (Obsidian behaviors noted in the RE report for later phases).
  */
 (function () {
@@ -20,7 +21,6 @@
 
   var SCALE_MIN = 0.2;
   var SCALE_MAX = 2.5;
-  var VELOCITY_WINDOW_MS = 120; // release-velocity sampling window
 
   function init(opts) {
     var viewport = opts.viewport;
@@ -33,7 +33,7 @@
     var onCardDropped = opts.onCardDropped || function () {};
     var raise = opts.raise || function () {};
 
-    var cardDrag = null; // { card, el, samples: [{x, y, t}] }
+    var cardDrag = null; // { card, el, sub: [descendants], grab: {x, y} }
     var panDrag = null;  // { startX, startY, viewX, viewY }
 
     function screenToWorld(clientX, clientY) {
@@ -45,7 +45,7 @@
     }
 
     viewport.addEventListener('pointerdown', function (e) {
-      if (e.button !== 0) return; // primary button only (C4)
+      if (e.button !== 0) return; // primary button only
       // Cards in edit mode own their pointer: text selection, not dragging.
       if (e.target.closest && e.target.closest('.card.editing')) return;
       onUserInteract(); // user takes over the camera
@@ -57,8 +57,20 @@
         raise(cardEl); // raise to top of paint order
         cardEl.classList.add('dragging');
         card.dragging = true;
-        var w = screenToWorld(e.clientX, e.clientY);
-        cardDrag = { card: card, el: cardEl, samples: [{ x: w.x, y: w.y, t: performance.now() }] };
+        // Pin on grab: the card stops drifting the instant you touch it and
+        // keeps whatever position the drop lands on.
+        card.pinned = true;
+        card.vx = 0;
+        card.vy = 0;
+        // Grab offset: the card keeps the exact point you grabbed it by, so
+        // it does not jump its centre to the cursor (Obsidian behaviour).
+        var w0 = screenToWorld(e.clientX, e.clientY);
+        cardDrag = {
+          card: card,
+          el: cardEl,
+          sub: opts.descendants ? opts.descendants(card.id) : [],
+          grab: { x: card.x - w0.x, y: card.y - w0.y }
+        };
       } else {
         viewport.classList.add('panning');
         panDrag = { startX: e.clientX, startY: e.clientY, viewX: view.x, viewY: view.y };
@@ -68,12 +80,19 @@
     viewport.addEventListener('pointermove', function (e) {
       if (cardDrag) {
         var w = screenToWorld(e.clientX, e.clientY);
-        var now = performance.now();
-        cardDrag.card.x = w.x;
-        cardDrag.card.y = w.y;
-        cardDrag.samples.push({ x: w.x, y: w.y, t: now });
-        while (cardDrag.samples.length > 2 && now - cardDrag.samples[0].t > VELOCITY_WINDOW_MS) {
-          cardDrag.samples.shift();
+        var nx = w.x + cardDrag.grab.x;
+        var ny = w.y + cardDrag.grab.y;
+        var dx = nx - cardDrag.card.x;
+        var dy = ny - cardDrag.card.y;
+        cardDrag.card.x = nx;
+        cardDrag.card.y = ny;
+        // Move the subtree rigidly rather than letting the springs drag it
+        // along behind: the branch stays exactly as you arranged it, and
+        // since every child anchor is parent + fixed offset, translating both
+        // by the same delta leaves zero residual force at release.
+        for (var i = 0; i < cardDrag.sub.length; i++) {
+          cardDrag.sub[i].x += dx;
+          cardDrag.sub[i].y += dy;
         }
         syncDOM();
       } else if (panDrag) {
@@ -86,16 +105,9 @@
     function endPointer() {
       if (cardDrag) {
         var card = cardDrag.card;
-        var s = cardDrag.samples;
-        if (s.length >= 2) {
-          var a = s[0], b = s[s.length - 1];
-          var dt = (b.t - a.t) / 1000;
-          if (dt > 0.005) {
-            card.vx = (b.x - a.x) / dt;
-            card.vy = (b.y - a.y) / dt;
-          }
-        }
         card.dragging = false;
+        card.vx = 0;
+        card.vy = 0;
         cardDrag.el.classList.remove('dragging');
         onCardPlaced(card); // the card's new position is worth persisting
         // Dropping a card's centre inside another card re-parents it.

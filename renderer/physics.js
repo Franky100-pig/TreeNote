@@ -13,8 +13,14 @@
  *   4. Seeded Brownian drift (reproducible impulses)
  *   5. Velocity damping
  * Integration: fixed-step semi-implicit Euler; cards being dragged are
- * positioned externally and their velocity is recorded by the caller, so
- * inertia carries them on release and the snap spring pulls them home.
+ * positioned externally and their velocity is recorded by the caller.
+ *
+ * Pinned cards opt out of all of it: they take no forces, do not drift and
+ * are not integrated, so they stay exactly where the user dropped them
+ * (Obsidian-style free placement). They still repel their neighbours and
+ * still anchor their children, so the tree keeps its shape. This is the
+ * answer to "the layout fights me": auto-layout is a starting suggestion,
+ * and touching a card makes it yours.
  *
  * Reference (Obsidian Canvas RE): Obsidian has no release inertia and no
  * physics at all — this module is cardwall's core differentiator.
@@ -87,6 +93,7 @@
     card.w = card.w || world.config.cardWidth;
     card.h = card.h || world.config.cardHeight;
     card.dragging = false;
+    card.pinned = !!card.pinned; // free placement: no forces, no drift
     card.fx = 0;
     card.fy = 0;
     world.cards.push(card);
@@ -158,10 +165,12 @@
     // 1. zero forces
     for (var i = 0; i < n; i++) { cards[i].fx = 0; cards[i].fy = 0; }
 
-    // 2. pairwise repulsion
+    // 2. pairwise repulsion (a pinned card is an immovable obstacle: it
+    //    still pushes its neighbour, but never receives the push back)
     var cutoff2 = cfg.repulsionCutoff * cfg.repulsionCutoff;
     for (var a = 0; a < n; a++) {
       for (var b = a + 1; b < n; b++) {
+        if (cards[a].pinned && cards[b].pinned) continue;
         var dx = cards[b].x - cards[a].x;
         var dy = cards[b].y - cards[a].y;
         var d2 = dx * dx + dy * dy;
@@ -169,15 +178,17 @@
         var d = Math.sqrt(d2);
         var f = cfg.repulsion / d;
         var ux = dx / d, uy = dy / d;
-        cards[a].fx -= ux * f; cards[a].fy -= uy * f;
-        cards[b].fx += ux * f; cards[b].fy += uy * f;
+        if (!cards[a].pinned) { cards[a].fx -= ux * f; cards[a].fy -= uy * f; }
+        if (!cards[b].pinned) { cards[b].fx += ux * f; cards[b].fy += uy * f; }
       }
     }
 
     // 3. snap springs (child anchors ride the parent; reaction applied to
-    //    the parent card) + parent-child springs
+    //    the parent card) + parent-child springs. Pinned cards take part as
+    //    anchors only, never as force receivers.
     for (var c = 0; c < n; c++) {
       var card = cards[c];
+      if (card.pinned) continue;
       var anchor = world.anchors.get(card.id);
       if (anchor) {
         var sx = (anchor.x - card.x) * cfg.snapStiffness;
@@ -186,7 +197,7 @@
         card.fy += sy;
         if (anchor.parentId) {
           var ap = findCard(world, anchor.parentId);
-          if (ap) { ap.fx -= sx; ap.fy -= sy; }
+          if (ap && !ap.pinned) { ap.fx -= sx; ap.fy -= sy; }
         }
       }
       if (card.parent) {
@@ -197,7 +208,7 @@
           var ef = (ed - cfg.springRestLength) * cfg.springStiffness;
           var eux = ex / ed, euy = ey / ed;
           card.fx += eux * ef; card.fy += euy * ef;
-          p.fx -= eux * ef; p.fy -= euy * ef;
+          if (!p.pinned) { p.fx -= eux * ef; p.fy -= euy * ef; }
         }
       }
     }
@@ -205,6 +216,7 @@
     // 4. seeded Brownian drift (reproducible)
     if (world.drift) {
       for (var g = 0; g < n; g++) {
+        if (cards[g].pinned) continue;
         if (world.rng() < cfg.driftChance) {
           cards[g].vx += (world.rng() * 2 - 1) * cfg.driftImpulse;
           cards[g].vy += (world.rng() * 2 - 1) * cfg.driftImpulse;
@@ -212,10 +224,11 @@
       }
     }
 
-    // 5. semi-implicit Euler integration (dragged cards are positioned externally)
+    // 5. semi-implicit Euler integration (dragged and pinned cards are
+    //    positioned externally and stay put)
     for (var k = 0; k < n; k++) {
       var q = cards[k];
-      if (q.dragging) continue;
+      if (q.dragging || q.pinned) { q.vx = 0; q.vy = 0; continue; }
       q.vx = (q.vx + q.fx * dt) * cfg.damping;
       q.vy = (q.vy + q.fy * dt) * cfg.damping;
       var sp = Math.sqrt(q.vx * q.vx + q.vy * q.vy);
@@ -236,6 +249,8 @@
    *   Note: anchors are a function of position (child anchors ride the parent),
    *   so they must be recomputed before evaluation — evaluating stale anchors
    *   against live positions would distort the total.
+   *   Pinned cards are frozen by construction, so their stored PE is not
+   *   convertible and is left out (only unpinned pairs are counted).
    */
   function totalEnergy(world) {
     var cfg = world.config;
@@ -244,6 +259,7 @@
     var cards = world.cards;
     for (var i = 0; i < cards.length; i++) {
       var c = cards[i];
+      if (c.pinned) continue;
       e += 0.5 * (c.vx * c.vx + c.vy * c.vy);
       var anchor = world.anchors.get(c.id);
       if (anchor) {
@@ -261,6 +277,7 @@
     }
     for (var a2 = 0; a2 < cards.length; a2++) {
       for (var b2 = a2 + 1; b2 < cards.length; b2++) {
+        if (cards[a2].pinned || cards[b2].pinned) continue;
         var ddx = cards[b2].x - cards[a2].x, ddy = cards[b2].y - cards[a2].y;
         var dd = Math.sqrt(ddx * ddx + ddy * ddy);
         if (dd > 1e-6) e -= cfg.repulsion * Math.log(Math.min(dd, cfg.repulsionCutoff));

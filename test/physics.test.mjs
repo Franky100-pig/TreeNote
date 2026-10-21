@@ -132,3 +132,47 @@ test('锚点结构：子卡锚点绕父卡当前位置成环', () => {
   const a1b = w.anchors.get('k1');
   assert.ok(Math.hypot(a1b.x - 500, a1b.y - 100) > 50, 'anchor follows parent move');
 });
+
+// ---- 自由放置（钉住）：拖动过的卡片归用户所有 -------------------------------
+
+test('钉住：拖放到锚点之外后纹丝不动（不回锚、不漂移）', () => {
+  const w = makeWorld(); // 漂移开着，最能暴露"手放好又飘走"
+  addCard(w, { id: 'p', x: 0, y: 0 });
+  addCard(w, { id: 'k', x: 40, y: 30, parent: 'p' });
+  const k = w.cards[1];
+  k.pinned = true;       // pointerdown 时发生
+  k.x = 600;             // 手放到远离 ring 锚点的位置
+  k.y = 420;
+  for (let i = 0; i < 600; i++) step(w);
+  assert.equal(k.x, 600);
+  assert.equal(k.y, 420);
+  assert.equal(k.vx, 0);
+  assert.equal(k.vy, 0);
+});
+
+test('钉住：仍然排斥邻居，但自己不受反作用力', () => {
+  const w = makeWorld({ drift: false });
+  addCard(w, { id: 'pin', x: 0, y: 0, pinned: true });
+  addCard(w, { id: 'free', x: 30, y: 0 });
+  for (let i = 0; i < 300; i++) step(w);
+  const pin = w.cards[0], free = w.cards[1];
+  assert.equal(pin.x, 0, 'pinned card never moves');
+  assert.equal(pin.y, 0);
+  const d = Math.hypot(free.x - pin.x, free.y - pin.y);
+  assert.ok(d > 150, `neighbour pushed away: ${d.toFixed(0)}`);
+});
+
+test('取消钉住：重新受力并把卡片拉回自己的锚点', () => {
+  const w = makeWorld({ drift: false });
+  addCard(w, { id: 'solo', x: 0, y: 0 });
+  const c = w.cards[0];
+  c.pinned = true;
+  c.x = 700;
+  c.y = 500;
+  for (let i = 0; i < 120; i++) step(w);
+  assert.equal(c.x, 700, 'frozen while pinned');
+  c.pinned = false;
+  for (let i = 0; i < 900; i++) step(w);
+  const back = Math.hypot(c.x - 700, c.y - 500);
+  assert.ok(back > 100, `snaps back once unpinned: moved ${back.toFixed(0)}px`);
+});

@@ -99,7 +99,10 @@ function sanitizeBoard(data) {
       note: String(c.note == null ? '' : c.note).slice(0, MAX_NOTE),
       x: Number.isFinite(c.x) ? c.x : 0,
       y: Number.isFinite(c.y) ? c.y : 0,
-      parent: null
+      parent: null,
+      // Free placement survives a reload: a card the user has positioned
+      // must not start drifting again the next time the board opens.
+      pinned: c.pinned === true
     });
   }
   // Second pass: parents may be declared after their children.
