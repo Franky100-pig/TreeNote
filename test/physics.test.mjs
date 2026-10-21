@@ -176,3 +176,56 @@ test('取消钉住：重新受力并把卡片拉回自己的锚点', () => {
   const back = Math.hypot(c.x - 700, c.y - 500);
   assert.ok(back > 100, `snaps back once unpinned: moved ${back.toFixed(0)}px`);
 });
+
+// ---- 休眠（dormancy）：静止的布局就真的静止 ---------------------------------
+
+test('休眠：安定后卡片停止积分，位置逐位冻结', () => {
+  const w = makeWorld({ drift: false });
+  addCard(w, { id: 'solo', x: 600, y: 400 });
+  const c = w.cards[0];
+  let sleptAt = -1;
+  for (let i = 0; i < 3000 && sleptAt < 0; i++) {
+    step(w);
+    if (!c.awake) sleptAt = i;
+  }
+  assert.ok(sleptAt > 0, 'card eventually falls asleep');
+  const at = { x: c.x, y: c.y };
+  for (let i = 0; i < 600; i++) step(w);
+  assert.equal(c.x, at.x, 'asleep card does not move');
+  assert.equal(c.y, at.y);
+  assert.equal(c.vx, 0);
+  assert.equal(c.vy, 0);
+});
+
+test('休眠：被拉动的邻居会把它唤醒，并跟上去', () => {
+  const w = makeWorld({ drift: false });
+  addCard(w, { id: 'p', x: 0, y: 0 });
+  addCard(w, { id: 'k', x: 40, y: 0, parent: 'p' });
+  for (let i = 0; i < 1200; i++) step(w);
+  const p = w.cards[0], k = w.cards[1];
+  assert.equal(k.awake, false, 'child asleep after settling');
+  const d0 = Math.hypot(k.x - p.x, k.y - p.y);
+  p.pinned = true;
+  p.x += 400; // yank the parent, as a drag would
+  for (let i = 0; i < 300; i++) step(w);
+  const d1 = Math.hypot(k.x - p.x, k.y - p.y);
+  assert.ok(d1 < d0 + 60, `child followed the parent: ${d0.toFixed(0)} -> ${d1.toFixed(0)}`);
+  assert.ok(k.x > 250, `child actually travelled: x=${k.x.toFixed(0)}`);
+});
+
+test('整体固定：漂移开着，安定 20s 后 60s 内位移小于 30px', () => {
+  const w = makeWorld();
+  const tree = [
+    ['root', null, 0, 0], ['n1', 'root', 160, -160], ['n2', 'root', 260, 90],
+    ['n3', 'root', -80, 210], ['n4', 'root', -260, -90], ['n5', 'n4', -260, -300]
+  ];
+  tree.forEach(([id, parent, x, y]) => addCard(w, { id, x, y, parent }));
+  for (let i = 0; i < 1200; i++) step(w);
+  const base = w.cards.map(c => ({ c, x: c.x, y: c.y }));
+  let maxDrift = 0;
+  for (let i = 0; i < 3600; i++) {
+    step(w);
+    for (const b of base) maxDrift = Math.max(maxDrift, Math.hypot(b.c.x - b.x, b.c.y - b.y));
+  }
+  assert.ok(maxDrift < 30, `resting layout holds still: max drift ${maxDrift.toFixed(1)}px`);
+});

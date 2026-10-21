@@ -22,6 +22,13 @@
  * answer to "the layout fights me": auto-layout is a starting suggestion,
  * and touching a card makes it yours.
  *
+ * Dormancy ("the board holds still, but breathes"):
+ * a card that has been quiet for `sleepSteps` falls asleep — no drift, no
+ * integration, position frozen — until a neighbour's force (a drag, a new
+ * card, a ripple) exceeds `sleepForce` and wakes it. So the resting board
+ * is a fixed arrangement instead of a constantly vibrating one, while a
+ * drag still ripples outward and the whole branch floats back to rest.
+ *
  * Reference (Obsidian Canvas RE): Obsidian has no release inertia and no
  * physics at all — this module is cardwall's core differentiator.
  * See the RE report for viewport/snap config defaults.
@@ -51,8 +58,14 @@
                            // 435px and the settled tree needed a 0.66 fit scale;
                            // 60 keeps big families compact, fit scale ~0.8)
 
-    driftImpulse: 25,      // Brownian impulse magnitude (px/s velocity delta)
-    driftChance: 0.02,     // per-step probability of a drift impulse
+    driftImpulse: 14,      // Brownian impulse magnitude (px/s velocity delta)
+    driftChance: 0.0009,   // per-step probability of a drift impulse (~1 per 18s
+                           // per card: a ripple, not a vibration. The old 0.02
+                           // fired ~1.2 times a second and read as "elastic")
+
+    sleepSpeed: 0.5,       // px/s: below this a card counts as momentarily still
+    sleepForce: 10,        // px/s^2: net force small enough to be "at rest"
+    sleepSteps: 40,        // consecutive quiet steps before a card falls asleep
 
     cardWidth: 250,        // default card width (matches Obsidian text cards)
     cardHeight: 60         // default card height
@@ -94,6 +107,8 @@
     card.h = card.h || world.config.cardHeight;
     card.dragging = false;
     card.pinned = !!card.pinned; // free placement: no forces, no drift
+    card.awake = card.awake === undefined ? true : !!card.awake;
+    card.still = 0;              // consecutive quiet steps (see dormancy)
     card.fx = 0;
     card.fy = 0;
     world.cards.push(card);
@@ -213,22 +228,38 @@
       }
     }
 
-    // 4. seeded Brownian drift (reproducible)
+    // 4. seeded Brownian drift (reproducible). A ripple also wakes a
+    //    sleeping card — that is how the resting board stays alive without
+    //    being a vibration: one card stirs, its branch follows, then it
+    //    goes back to sleep.
     if (world.drift) {
       for (var g = 0; g < n; g++) {
-        if (cards[g].pinned) continue;
+        if (cards[g].pinned || cards[g].dragging) continue;
         if (world.rng() < cfg.driftChance) {
           cards[g].vx += (world.rng() * 2 - 1) * cfg.driftImpulse;
           cards[g].vy += (world.rng() * 2 - 1) * cfg.driftImpulse;
+          if (!cards[g].awake) { cards[g].awake = true; cards[g].still = 0; }
         }
       }
     }
 
-    // 5. semi-implicit Euler integration (dragged and pinned cards are
-    //    positioned externally and stay put)
+    // 5. wake test: a sleeping card stays frozen until something actually
+    //    pulls on it. Pinned and dragged cards are always "awake" so that
+    //    releasing them rejoins the float immediately.
+    for (var w = 0; w < n; w++) {
+      var wc = cards[w];
+      if (wc.pinned || wc.dragging) { wc.awake = true; wc.still = 0; continue; }
+      if (!wc.awake && (wc.fx * wc.fx + wc.fy * wc.fy) > cfg.sleepForce * cfg.sleepForce) {
+        wc.awake = true;
+        wc.still = 0;
+      }
+    }
+
+    // 6. semi-implicit Euler integration (dragged, pinned and sleeping cards
+    //    are positioned externally or intentionally still)
     for (var k = 0; k < n; k++) {
       var q = cards[k];
-      if (q.dragging || q.pinned) { q.vx = 0; q.vy = 0; continue; }
+      if (q.dragging || q.pinned || !q.awake) { q.vx = 0; q.vy = 0; continue; }
       q.vx = (q.vx + q.fx * dt) * cfg.damping;
       q.vy = (q.vy + q.fy * dt) * cfg.damping;
       var sp = Math.sqrt(q.vx * q.vx + q.vy * q.vy);
@@ -239,6 +270,32 @@
       q.x += q.vx * dt;
       q.y += q.vy * dt;
     }
+
+    // 7. dormancy: quiet for sleepSteps in a row (low speed *and* low net
+    //    force) and the card stops integrating — the arrangement holds.
+    for (var s = 0; s < n; s++) {
+      var sc = cards[s];
+      if (sc.pinned || sc.dragging || !sc.awake) continue;
+      var v2 = sc.vx * sc.vx + sc.vy * sc.vy;
+      var f2 = sc.fx * sc.fx + sc.fy * sc.fy;
+      if (v2 < cfg.sleepSpeed * cfg.sleepSpeed && f2 < cfg.sleepForce * cfg.sleepForce) {
+        sc.still++;
+        if (sc.still >= cfg.sleepSteps) {
+          sc.awake = false;
+          sc.vx = 0;
+          sc.vy = 0;
+        }
+      } else {
+        sc.still = 0;
+      }
+    }
+  }
+
+  /** Wake a card so it rejoins the float (used when it is disturbed on purpose). */
+  function wake(card) {
+    if (!card) return;
+    card.awake = true;
+    card.still = 0;
   }
 
   /**
@@ -294,6 +351,7 @@
     findCard: findCard,
     computeAnchors: computeAnchors,
     step: step,
+    wake: wake,
     totalEnergy: totalEnergy,
     mulberry32: mulberry32
   };
