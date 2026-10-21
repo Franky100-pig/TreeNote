@@ -1,6 +1,6 @@
 {
   "name": "cardwall",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "力导向漂浮卡片墙笔记工具 — 要点级卡片 + 可自由拖动 + 物理飘动",
   "main": "main.js",
   "scripts": {
