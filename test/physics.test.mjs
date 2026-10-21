@@ -73,16 +73,19 @@ test('回弹：子卡被拉远后回到父卡附近的 ring 位', () => {
   const w = makeWorld({ drift: false });
   addCard(w, { id: 'p', x: 0, y: 0 });
   addCard(w, { id: 'k', x: 800, y: 600, parent: 'p' });
+  const cfg = w.config;
+  const K = cfg.snapStiffness + cfg.springStiffness;
+  const dTheory = (K * cfg.springRestLength +
+    Math.sqrt(K * K * cfg.springRestLength * cfg.springRestLength + 4 * K * cfg.repulsion)) / (2 * K);
   for (let i = 0; i < 900; i++) step(w);
   const k = w.cards[1];
   const anchor = w.anchors.get('k');
+  // 子卡静止在锚点角向、距父卡 dTheory 处；排斥力把卡从锚点再外推约
+  // (dTheory - ringR) ≈ 60px，这是设计使然的「呼吸空间」，非收敛缺陷。
   const dist = Math.hypot(k.x - anchor.x, k.y - anchor.y);
-  // 静止点被排斥力外推：环半径=弹簧自然长度时恢复力同向（总刚度 snap+spring=16），
-  // 解析平衡 K*(d-150) = repulsion/d → d*≈197.5px，即子卡静止在锚点外 ~47px。
-  // 这是设计使然的「呼吸空间」（排斥提供间距），非收敛缺陷；阈值按解析解放宽。
-  assert.ok(dist < 60, `child settles near ring anchor (repulsion-shifted), got ${dist.toFixed(2)}`);
+  assert.ok(dist < 80, `child settles near its ring anchor (repulsion-shifted), got ${dist.toFixed(2)}`);
   const dParent = Math.hypot(k.x - w.cards[0].x, k.y - w.cards[0].y);
-  assert.ok(dParent > 100 && dParent < 250, `parent-child distance organic: ${dParent.toFixed(0)}`);
+  assert.ok(Math.abs(dParent - dTheory) < 8, `parent-child distance = radial equilibrium ${dTheory.toFixed(0)}: ${dParent.toFixed(0)}`);
   const speed = Math.hypot(k.vx, k.vy);
   assert.ok(speed < 1, `child fully at rest: speed=${speed.toFixed(3)}`);
 });

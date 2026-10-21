@@ -4,14 +4,25 @@
  * Pure logic, zero dependencies: UMD-wrapped so the same module runs in
  * Node (unit tests) and the browser (renderer).
  *
- * Per-step forces:
- *   1. Pairwise repulsion (O(n^2), with cutoff)
- *   2. Parent-child spring (tree edges, rest length ~150px)
- *   3. Snap-back ring anchor (children orbit the parent's live position;
- *      roots orbit the world origin). Reaction forces are applied to the
- *      parent card so the force field stays conservative.
- *   4. Seeded Brownian drift (reproducible impulses)
- *   5. Velocity damping
+ * Per-step forces (all on non-pinned cards; pinned cards opt out):
+ *   1. Pairwise repulsion (O(n^2), with cutoff) — soft spacing, no bounce.
+ *   2. Structural coupling: ONE central spring per card pulls it to its LIVE
+ *      anchor point (roots -> world origin, children -> parent+offset). One
+ *      force centre per card means no tangential mismatch, so a dragged child
+ *      trails smoothly and settles instead of orbiting its anchor forever
+ *      (the old two-centre snap+tree-edge design whirled). Reaction goes to
+ *      the parent so the field stays conservative.
+ *   3. Per-spring (relative-velocity) damping on the structural coupling:
+ *      makes the coupling critically damped regardless of the global damping,
+ *      so it cannot re-pump PE->KE and slosh — it settles in <1s with no
+ *      overshoot. This is the "stop, don't bounce" half of the jellyfish feel.
+ *   4. Drag wake: the card in hand pushes its neighbours, distance-attenuated,
+ *      in its own travel direction. Pure push, so it can never oscillate. This
+ *      is the "others float by distance while you drag" half.
+ *   5. Seeded Brownian drift (reproducible impulses) — the board breathes.
+ *   6. Light global velocity damping — the softness that lets the drift read
+ *      as jellyfish rather than elastic. Kept light BECAUSE the structural
+ *      settle is handled by the per-spring damper (3), not by this.
  * Integration: fixed-step semi-implicit Euler; cards being dragged are
  * positioned externally and their velocity is recorded by the caller.
  *
@@ -41,22 +52,68 @@
 
   var CONFIG = {
     dt: 1 / 60,            // fixed step (seconds)
-    damping: 0.975,        // per-step velocity damping (lambda ~1.5/s, "floaty" feel)
+    damping: 0.95,         // per-step GLOBAL velocity damping. This is the
+                           // "floaty drift" softness AND it dissipates the
+                           // drag-wake / repulsion kinetic energy quickly after
+                           // a drag ends. The structural settle (no bounce, ~1s)
+                           // is owned by the per-spring damper, so this value is
+                           // firm enough to kill the wake slosh fast without
+                           // over-damping the structural tail (that is the
+                           // per-spring damper's job).
     maxSpeed: 3000,        // velocity cap (px/s)
 
-    repulsion: 150000,     // repulsion strength: a = repulsion / d (px/s^2)
+    repulsion: 90000,      // repulsion strength: a = repulsion / d (px/s^2).
+                           // Gentle on purpose: a close encounter is a soft
+                           // nudge, not a hard bounce, so the wall reads as
+                           // floating water rather than elastic coils.
     repulsionCutoff: 800,  // repulsion cutoff (px)
 
-    springRestLength: 150, // parent-child spring rest length (px)
-    springStiffness: 10,   // tree-edge stiffness (omega ~3.2 rad/s)
+    springRestLength: 200, // anchor ring rest length for a single child (px).
+                           // Nudged up from 150 so the stiffer coupling below
+                           // does not pull cards into overlap; keeps the ~210px
+                           // spacing the layout already had. With >1 sibling the
+                           // ring grows (ringSpacing) so a big family stays
+                           // compact; see computeAnchors.
+    springStiffness: 22,   // structural-coupling stiffness (combined with
+                           // snapStiffness into ONE central spring to the live
+                           // anchor). Stiff enough that the tree's lowest
+                           // relaxation mode is fast (~1s): ω=√K. The per-spring
+                           // damper keeps it critically damped, so the higher
+                           // stiffness reads as a quick smooth glide, not a
+                           // bounce. The lively "follow" during a drag comes from
+                           // the wake, not from this spring.
 
-    snapStiffness: 6,      // snap-back spring stiffness (weaker than tree edges
-                           // so the tree shape stays readable)
-    ringBaseRadius: 180,   // root ring base radius
+    snapStiffness: 22,     // structural-coupling stiffness component for the
+                           // ring anchor. Combined with springStiffness as
+                           // K = snapStiffness + springStiffness (=44).
+
+    // Per-spring (relative-velocity) damping RATIO for the structural coupling.
+    // Critical damping of a spring of stiffness K is c = 2*sqrt(K); we run
+    // exactly critical (dampRatio = 1.0) so the coupling settles in the
+    // shortest time with NO overshoot — over-damping would creep slowly to
+    // rest (a long tail), under-damping would bounce. Critical is the sweet
+    // spot for "stop dead in ~1s, no spring snap".
+    dampRatio: 1.0,
+    ringBaseRadius: 220,   // root ring base radius
     ringSpacing: 60,       // radius increment per extra sibling on the same ring
                            // (C7: 95 -> 60 — with 4 children the anchors reached
                            // 435px and the settled tree needed a 0.66 fit scale;
                            // 60 keeps big families compact, fit scale ~0.8)
+
+    // Drag wake: the card in your hand pushes its neighbours, distance
+    // attenuated, in the direction it is moving — like a body moving through
+    // water carries the fluid with it. This is what makes "other cards float
+    // while you drag" read as organic, and being a pure push (no restoring
+    // pull) it can never oscillate.
+    wakeRadius: 520,       // how far the ripple reaches (px)
+    wakeStrength: 1.5,     // how strongly neighbours are carried along (force per
+                           // unit grabbed-card speed, distance-attenuated). Gentle
+                           // on purpose: the wake should FLOAT cards, not fling
+                           // them — a hard wake injects kinetic energy that the
+                           // board then has to dissipate, defeating the ~1s
+                           // settle. The structural spring (stiffer) does the
+                           // "follow the dragged parent" part; the wake adds the
+                           // distance-based drift of UNRELATED neighbours.
 
     driftImpulse: 14,      // Brownian impulse magnitude (px/s velocity delta)
     driftChance: 0.0009,   // per-step probability of a drift impulse (~1 per 18s
@@ -65,7 +122,7 @@
 
     sleepSpeed: 0.5,       // px/s: below this a card counts as momentarily still
     sleepForce: 10,        // px/s^2: net force small enough to be "at rest"
-    sleepSteps: 40,        // consecutive quiet steps before a card falls asleep
+    sleepSteps: 60,        // consecutive quiet steps (~1s) before a card sleeps
 
     cardWidth: 250,        // default card width (matches Obsidian text cards)
     cardHeight: 60         // default card height
@@ -148,7 +205,7 @@
       var idx = roots.indexOf(c);
       var r = cfg.ringBaseRadius + cfg.ringSpacing * Math.max(0, roots.length - 1);
       var theta = (idx / Math.max(1, roots.length)) * Math.PI * 2 + 0.3;
-      world.anchors.set(c.id, { x: Math.cos(theta) * r, y: Math.sin(theta) * r, parentId: null });
+      world.anchors.set(c.id, { x: Math.cos(theta) * r, y: Math.sin(theta) * r, parentId: null, ringR: r });
     });
 
     kidsByParent.forEach(function (kids, pid) {
@@ -162,7 +219,8 @@
         world.anchors.set(k.id, {
           x: p.x + Math.cos(theta) * r,
           y: p.y + Math.sin(theta) * r,
-          parentId: pid
+          parentId: pid,
+          ringR: r
         });
       });
     });
@@ -198,37 +256,98 @@
       }
     }
 
-    // 3. snap springs (child anchors ride the parent; reaction applied to
-    //    the parent card) + parent-child springs. Pinned cards take part as
-    //    anchors only, never as force receivers.
+    // 3. structural coupling — ONE central spring per card, to its LIVE
+    //    anchor point. Roots anchor at the world origin (fixed); children
+    //    anchor at parent+offset, so the anchor travels with the parent and
+    //    the branch never tears. A single force centre per card means there
+    //    is no tangential mismatch (the old snap+tree-edge two-centre design
+    //    whirled children around their anchor forever and they never slept),
+    //    so a dragged child trails smoothly and settles. Reaction forces are
+    //    applied to the parent card so the field stays conservative.
+    var K = cfg.snapStiffness + cfg.springStiffness;
+    var dampCoef = cfg.dampRatio * 2 * Math.sqrt(K); // critical damping of K, x ratio
     for (var c = 0; c < n; c++) {
       var card = cards[c];
       if (card.pinned) continue;
       var anchor = world.anchors.get(card.id);
-      if (anchor) {
-        var sx = (anchor.x - card.x) * cfg.snapStiffness;
-        var sy = (anchor.y - card.y) * cfg.snapStiffness;
-        card.fx += sx;
-        card.fy += sy;
-        if (anchor.parentId) {
-          var ap = findCard(world, anchor.parentId);
-          if (ap && !ap.pinned) { ap.fx -= sx; ap.fy -= sy; }
-        }
+      if (!anchor) continue;
+
+      // Centre of the coupling = the live anchor point. Its velocity is the
+      // parent card's velocity (the anchor is rigidly attached to the parent);
+      // for a root the anchor is fixed so its velocity is zero.
+      var cx = anchor.x, cy = anchor.y;
+      var cvx = 0, cvy = 0;
+      var pcard = null;
+      if (anchor.parentId) {
+        pcard = findCard(world, anchor.parentId);
+        if (pcard && !pcard.pinned) { cvx = pcard.vx; cvy = pcard.vy; }
       }
-      if (card.parent) {
-        var p = findCard(world, card.parent);
-        if (p) {
-          var ex = p.x - card.x, ey = p.y - card.y;
-          var ed = Math.sqrt(ex * ex + ey * ey) || 1e-6;
-          var ef = (ed - cfg.springRestLength) * cfg.springStiffness;
-          var eux = ex / ed, euy = ey / ed;
-          card.fx += eux * ef; card.fy += euy * ef;
-          if (!p.pinned) { p.fx -= eux * ef; p.fy -= euy * ef; }
-        }
-      }
+
+      var dx = card.x - cx, dy = card.y - cy;
+      var d = Math.sqrt(dx * dx + dy * dy) || 1e-6;
+      // The card rests AT its anchor point, so the spring rest length is zero.
+      // ringR only decides WHERE the anchor sits relative to the parent (the
+      // ring radius); it is NOT the spring rest length. A non-zero rest length
+      // would make the card settle ringR *away* from the anchor and the whole
+      // layout would be pushed out by exactly the ring radius.
+      var restLen = 0;
+      var rux = dx / d, ruy = dy / d;          // unit vector card -> anchor
+
+      // Restoring spring force (toward the anchor when stretched): the force
+      // on the card points from the card back to the anchor, i.e. -rux when
+      // stretched. Magnitude = K*(d - restLen).
+      var sf = (d - restLen) * K;              // +ve beyond rest, -ve inside
+      var fx = rux * sf, fy = ruy * sf;        // NOTE: force on card = -(fx,fy)
+
+      // Per-spring (relative-velocity) damper: opposes the FULL card<->anchor
+      // relative velocity — both the radial stretch and any tangential swing,
+      // not just the radial component. Damping only the radial part left the
+      // tangential swing to be killed solely by the light global damping,
+      // which made the branch slosh for seconds (a dragged child whips around
+      // to its anchor angle and keeps ringing). Damping the whole relative
+      // velocity makes the coupling critically damped in 2D: the radial mode is
+      // a critically-damped oscillator and the tangential mode is a first-order
+      // viscous decay, so a dragged child trails and stops in well under a
+      // second with no overshoot. dampCoef = dampRatio*2*sqrt(K) is critical at
+      // dampRatio=1 — over-damping would creep, under-damping would bounce.
+      var rvx = card.vx - cvx, rvy = card.vy - cvy;
+      var dfx = rvx * dampCoef, dfy = rvy * dampCoef; // opposes relative motion
+
+      // Force on card = -(spring + damper); equal-and-opposite on the parent.
+      card.fx -= fx + dfx;
+      card.fy -= fy + dfy;
+      if (pcard) { pcard.fx += fx + dfx; pcard.fy += fy + dfy; }
     }
 
-    // 4. seeded Brownian drift (reproducible). A ripple also wakes a
+    // 4. drag wake — a moving card carries its neighbours along, distance
+    //    attenuated, in its own direction of travel. Pure push, no restoring
+    //    pull, so it can never oscillate (that is the whole point: "float
+    //    like a jellyfish, not a spring"). The velocity of the grabbed card
+    //    is reconstructed from its position delta, since a dragging card is
+    //    positioned externally and its stored velocity is zeroed.
+    for (var dg = 0; dg < n; dg++) {
+      var dcard = cards[dg];
+      if (!dcard.dragging) continue;
+      var dvx = (dcard.x - (dcard._px != null ? dcard._px : dcard.x)) / dt;
+      var dvy = (dcard.y - (dcard._py != null ? dcard._py : dcard.y)) / dt;
+      var dsp2 = dvx * dvx + dvy * dvy;
+      if (dsp2 > 1) {
+        for (var o = 0; o < n; o++) {
+          var other = cards[o];
+          if (other.dragging || other.pinned) continue;
+          var ox = other.x - dcard.x, oy = other.y - dcard.y;
+          var od = Math.sqrt(ox * ox + oy * oy) || 1e-6;
+          if (od > cfg.wakeRadius) continue;
+          var fall = 1 - od / cfg.wakeRadius; // 1 at the grabbed card -> 0 at edge
+          other.fx += dvx * cfg.wakeStrength * fall;
+          other.fy += dvy * cfg.wakeStrength * fall;
+        }
+      }
+      dcard._px = dcard.x;
+      dcard._py = dcard.y;
+    }
+
+    // 5. seeded Brownian drift (reproducible). A ripple also wakes a
     //    sleeping card — that is how the resting board stays alive without
     //    being a vibration: one card stirs, its branch follows, then it
     //    goes back to sleep.
