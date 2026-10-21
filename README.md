@@ -1,5 +1,7 @@
 # cardwall（TreeNote）
 
+<img src="docs/icon.png" width="92" align="right" alt="cardwall icon">
+
 > The next version of taking digital notes — 但笔记得能飘。
 
 力导向**漂浮卡片墙**笔记工具：要点级卡片 + 自由拖动 + 物理飘动（斥力 / 弹簧 / 阻尼 / 布朗漂移 / 释放惯性）。
@@ -18,6 +20,10 @@ Electron 桌面应用，零前端框架：DOM 卡片 + SVG 连线 + CSS transfor
 
 ![light theme](docs/theme-light.png)
 
+## 下载
+
+[GitHub Releases](https://github.com/Franky100-pig/TreeNote/releases/latest) 提供 macOS（arm64）dmg。未做代码签名，首次启动需**右键 → 打开**，或执行 `xattr -dr com.apple.quarantine /Applications/cardwall.app`。
+
 ## 开发
 
 ```bash
@@ -33,7 +39,7 @@ npm run dist       # 打包 macOS dmg
 ### 打包
 
 ```bash
-npm run dist       # → dist/cardwall-0.2.0-arm64.dmg
+npm run dist       # → dist/cardwall-<version>-arm64.dmg
 ```
 
 未做代码签名（无 Developer ID）+ 使用 Electron 默认图标，首次打开需在 Finder 里右键 →「打开」。国内网络建议带镜像：
@@ -111,6 +117,8 @@ renderer/app.js         世界容器、边几何、固定步长循环、相机�
 renderer/interaction.js 平移 / 锚点缩放 / 拖拽 + 释放惯性 / 改挂
 renderer/debug.js       F3 叠加
 renderer/sample.js      首次启动的示例树
+build/icon.svg          图标源文件（1024 画布，圆角底板 + 卡片树）
+build/icon.icns         由上面的 SVG 栅格化后 iconutil 生成，electron-builder 取用
 test/physics.test.mjs   9 项单测
 ```
 
@@ -126,6 +134,7 @@ test/physics.test.mjs   9 项单测
 - [x] C8 dmg 打包（electron-builder，arm64）
 - [x] C9 README/截图/tag
 - [x] C10 深色主题（纯黑画布 + `Cmd/Ctrl+Shift+L` 切换 + 首帧无闪）
+- [x] C11 应用图标（卡片树字形，SVG 源 + icns）+ 首个 Release
 
 ## 许可
 
