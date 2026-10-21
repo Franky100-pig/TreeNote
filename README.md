@@ -4,9 +4,9 @@
 
 > The next version of taking digital notes — 但笔记得能飘。
 
-力导向**漂浮卡片墙**笔记工具：要点级卡片 + 自由拖动 + 物理飘动（斥力 / 弹簧 / 阻尼 / 布朗漂移）。拖过的卡片立刻定住，没碰过的继续呼吸。
+力导向**漂浮卡片墙**笔记工具：要点级卡片 + 自由拖动 + 物理飘动（斥力 / 弹簧 / 阻尼 / 偶发漂移）。拖过的卡片立刻定住，整块布局安顿下来就静止；只有被你碰过的地方才继续呼吸。
 
-Electron 桌面应用，零前端框架：DOM 卡片 + SVG 连线 + CSS transform 世界容器，架构对标 Obsidian Canvas 的逆向结论（证据见仓库外 `obsidian-canvas-re/RE-obsidian-canvas.md`）。与 Obsidian 的关键差异：Canvas 没有物理、没有释放惯性；cardwall 的整棵树靠力场持续轻微呼吸。
+Electron 桌面应用，零前端框架：DOM 卡片 + SVG 连线 + CSS transform 世界容器，架构对标 Obsidian Canvas 的逆向结论（证据见仓库外 `obsidian-canvas-re/RE-obsidian-canvas.md`）。与 Obsidian 的关键差异：Canvas 没有物理、没有释放惯性；cardwall 用弹簧和斥力决定卡片怎么「漂」过去。
 
 默认黑色画布（`Cmd/Ctrl+Shift+L` 可切回纸感浅色，选择会被记住）：
 
@@ -29,7 +29,7 @@ Electron 桌面应用，零前端框架：DOM 卡片 + SVG 连线 + CSS transfor
 ```bash
 npm install
 npm start          # 正常启动
-npm test           # 物理引擎单测（9 项）
+npm test           # 物理引擎单测（15 项）
 npm run smoke      # 八层自检：渲染 / 相机 / 调试 / 主题 / 交互 / 编辑 / 存盘 / 读盘 + 截图
 npm run dist       # 打包 macOS dmg
 ```
@@ -42,7 +42,7 @@ npm run dist       # 打包 macOS dmg
 npm run dist       # → dist/cardwall-<version>-arm64.dmg
 ```
 
-未做代码签名（无 Developer ID）+ 使用 Electron 默认图标，首次打开需在 Finder 里右键 →「打开」。国内网络建议带镜像：
+未做代码签名（无 Developer ID），首次打开需在 Finder 里右键 →「打开」。国内网络建议带镜像：
 
 ```bash
 ELECTRON_MIRROR="https://npmmirror.com/mirrors/electron/" \
@@ -67,7 +67,7 @@ npm run dist
 | 新建卡片 | 双击空白处（自动挂到 320px 内最近的卡片，否则为根卡） |
 | 删除卡片 | 选中后按 Delete / Backspace（子卡改挂到祖父卡） |
 | 改挂父级 | 把卡片拖到另一张卡片上（禁止挂到自己的后代，避免成环） |
-| 自由拖动 | 按住卡片拖到任意位置，**松手即定**（无惯性、无回弹）；整支子树随拖拽刚性平移 |
+| 自由拖动 | 按住卡片拖到任意位置，**松手即定**（无惯性、无回弹）；整支子树由弹簧带着漂过去，不跟手指刚性平移 |
 | 重新漂浮 | 选中卡片按 `P`：交还给力场，回到自己的环位 |
 | 平移 / 缩放 | 拖动空白处 / 滚轮（以光标为锚点，缩放范围 0.2–2.5） |
 | 调试叠加 | `F3`（Mac 上可能是 Fn+F3）或 `Cmd+Shift+D`：fps、卡数、仿真时间、scale、峰值速度、机械能、锚点、速度矢量 |
@@ -77,9 +77,11 @@ npm run dist
 
 ### 自由放置 vs 自动布局
 
-自动布局只是**初值建议**：新建的卡片会落在环位上并被力场整理成树。但你一旦碰过某张卡片——拖动它，或者在空白处新建它——它就被**钉住**（`pinned`）：不受回锚弹簧、不参与布朗漂移、不积分，停在手放下的那一格，重启后依旧在原处（`board.json` 里带 `pinned` 字段）。
+自动布局只是**初值建议**：新建的卡片会落在环位上并被力场整理成树。但你一旦碰过某张卡片——拖动它，或者在空白处新建它——它就被**钉住**（`pinned`）：不受回锚弹簧、不参与漂移、不积分，停在手放下的那一格，重启后依旧在原处（`board.json` 里带 `pinned` 字段）。想让它回到力场里，选中按 `P`。
 
-没碰过的卡片继续轻轻呼吸。想让它回到力场里，选中按 `P`。
+没有被钉住的卡片也不会一直乱飘：**安静 40 步（速度与合力都低于阈值）就睡着**（`awake = false`），停止积分、位置逐位冻结，直到某个力真的超过阈值才被唤醒。所以安顿下来的布局是固定的一堵墙，而不是一直在抖的一堆卡片；漂移降到每张卡约 18 秒一次，作用只是偶尔叫醒一张卡让它轻轻飘一下——一次涟漪，不是持续震颤。实测示例树静置 60 秒的最大位移从 21.4px 降到 4.0px。
+
+拖动的语义因此是：**只有你手里那张卡跟手，其余的都交给物理**。子树靠弹簧拖着走、邻居被斥力推开，整块墙像水面一样跟着动；松手后它们各自漂回环位再睡回去。
 
 ## 主题
 
@@ -100,7 +102,8 @@ npm run dist
 | `springRestLength` / `springStiffness` | 150px / 10 | 父子树边 |
 | `snapStiffness` | 6 | 回锚弹簧（弱于树边，树形更清晰） |
 | `ringBaseRadius` / `ringSpacing` | 180 / 60 | 根卡环半径、每多一个同层卡片的增量 |
-| `driftImpulse` / `driftChance` | 25 px/s / 0.02 | 布朗漂移（seeded，可复现） |
+| `driftImpulse` / `driftChance` | 14 px/s / 0.0009 | 偶发漂移（seeded，可复现；约 18 秒一次，同时负责唤醒） |
+| `sleepSpeed` / `sleepForce` / `sleepSteps` | 0.5 px/s / 10 px/s² / 40 步 | 休眠判据：够慢、合力够小、连续够久 → 停止积分 |
 
 静止距离不是锚点半径：排斥会把静止点外推，单子卡的解析平衡是 `(snap+spring)·(d−rest) = repulsion/d → d≈197px`，单测里用这个解析解做回归。
 
@@ -121,20 +124,20 @@ index.html styles.css    外壳、主题 token（深色默认 + 浅色覆盖）�
 renderer/theme-boot.js  首帧应用已保存的主题（避免浅色闪黑）
 renderer/physics.js     力导向积分器（UMD，Node 单测 + 浏览器共用）
 renderer/app.js         世界容器、边几何、固定步长循环、相机、编辑、持久化接线
-renderer/interaction.js 平移 / 锚点缩放 / 拖拽 + 释放惯性 / 改挂
+renderer/interaction.js 平移 / 锚点缩放 / 拖拽（钉住 + 子树漂浮）/ 改挂
 renderer/debug.js       F3 叠加
 renderer/sample.js      首次启动的示例树
 build/icon.svg          图标源文件（1024 画布，圆角底板 + 卡片树）
 build/icon.icns         由上面的 SVG 栅格化后 iconutil 生成，electron-builder 取用
-test/physics.test.mjs   9 项单测
+test/physics.test.mjs   15 项单测
 ```
 
 ## 当前进度
 
 - [x] C1 脚手架（Electron 最小窗口）
-- [x] C2 物理核心（力导向集成器 + 9 项单测）
+- [x] C2 物理核心（力导向集成器 + 单测）
 - [x] C3 渲染骨架（DOM 卡 + SVG 贝塞尔边 + 固定步长 rAF）
-- [x] C4 交互（平移/锚点缩放/拖拽 + 释放惯性 + 相机补间/安定取景）
+- [x] C4 交互（平移/锚点缩放/拖拽 + 相机补间/安定取景）
 - [x] C5 卡片编辑（选中/双击编辑/新建/删除/拖拽改挂）
 - [x] C6 持久化（JSON vault + IPC + 原子写）
 - [x] C7 手感调参 + F3 调试叠加
@@ -142,7 +145,8 @@ test/physics.test.mjs   9 项单测
 - [x] C9 README/截图/tag
 - [x] C10 深色主题（纯黑画布 + `Cmd/Ctrl+Shift+L` 切换 + 首帧无闪）
 - [x] C11 应用图标（卡片树字形，SVG 源 + icns）+ 首个 Release
-- [x] C12 自由放置（拖过即定住、整支平移、`P` 交还力场）
+- [x] C12 自由放置（拖过即定住、`P` 交还力场）
+- [x] C13 固定布局（休眠 + 偶发涟漪）+ 拖动时子树漂浮而非刚性平移
 
 ## 许可
 
