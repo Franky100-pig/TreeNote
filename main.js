@@ -140,7 +140,7 @@ function createWindow() {
     minWidth: 640,
     minHeight: 480,
     title: 'cardwall',
-    backgroundColor: '#f7f5f0',
+    backgroundColor: '#000000',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,

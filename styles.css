@@ -1,8 +1,8 @@
 /* Theme tokens: every colour the UI draws comes from here, so a theme is
    just a different set of these values. */
 :root {
-  --bg: #f7f5f0;
-  --bg-fade: rgba(247, 245, 240, 0);
+  --bg: #000000;
+  --bg-fade: rgba(0, 0, 0, 0);
   --ink: #3d3a34;
   --muted: #8a8577;
   --surface: #ffffff;
