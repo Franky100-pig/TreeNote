@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import physics from '../renderer/physics.js';
 
-const { createWorld, addCard, step, totalEnergy, computeTreeLayout } = physics;
+const { createWorld, addCard, step, totalEnergy, computeTreeLayout, reanchorOnDrop } = physics;
 
 function makeWorld(opts) {
   return createWorld({ seed: 42, ...opts });
@@ -69,9 +69,9 @@ test('tidy 布局：同深度共享层级，父节点居中于子节点，叶子
   for (const id of ['c1', 'c2', 'c3', 'c4']) assert.equal(Y(id), cfg.levelGap);
   assert.equal(Y('g'), 2 * cfg.levelGap);
   // root centred over its OUTERMOST children (leftmost & rightmost at depth 1).
-  // NOTE: computeTreeLayout packs children in x-sorted order, so the rightmost
-  // depth-1 child here is c3 (x=400), not c4 (x=200, which has a grandchild).
-  // Check against the actual min/max rather than hard-coding the pair.
+  // NOTE: computeTreeLayout packs children in id-sorted order (position-
+  // independent, so layout is a pure function of tree structure), so we check
+  // against the actual min/max rather than hard-coding the pair.
   const xs1 = ['c1', 'c2', 'c3', 'c4'].map(O);
   assert.ok(Math.abs(O('root') - (Math.min(...xs1) + Math.max(...xs1)) / 2) < 1e-6, 'root centred over outermost children');
   // Leaves on a level are spaced by nodeGap (minimum pairwise distance).
@@ -231,4 +231,64 @@ test('拖拽中卡片位置由外部控制、不受力积分影响', () => {
   for (let i = 0; i < 60; i++) step(w);
   assert.equal(w.cards[1].x, 500);
   assert.equal(w.cards[1].y, 400);
+});
+
+test('松手落点：拖子释放后停在手放处，其余重排为整齐树（不再弹回）', () => {
+  const w = makeWorld({ drift: false });
+  addCard(w, { id: 'root', x: 0, y: 0 });
+  addCard(w, { id: 'c1', x: 0, y: 0, parent: 'root' });
+  addCard(w, { id: 'c2', x: 0, y: 0, parent: 'root' });
+  addCard(w, { id: 'c3', x: 0, y: 0, parent: 'root' });
+  addCard(w, { id: 'g', x: 0, y: 0, parent: 'c1' });
+  const root = physics.findCard(w, 'root');
+  const c1 = physics.findCard(w, 'c1');
+  const c2 = physics.findCard(w, 'c2');
+  const g = physics.findCard(w, 'g');
+  for (let i = 0; i < 800; i++) step(w); // settle so rootHome is parked
+  // Simulate: drag c2 far away and drop it.
+  const drop = { x: root.x + 520, y: root.y + 360 };
+  c2.x = drop.x; c2.y = drop.y;
+  reanchorOnDrop(w, c2);   // onCardPlaced re-anchors on the dropped card
+  w.dragId = null;          // release
+  for (let i = 0; i < 1500; i++) step(w);
+  // The dropped child holds its spot (does NOT snap back to canonical tree).
+  assert.ok(Math.hypot(c2.x - drop.x, c2.y - drop.y) < 8, `dropped child stays put: moved ${Math.hypot(c2.x - drop.x, c2.y - drop.y).toFixed(1)}px`);
+  // The rest re-tidies into a clean diagram around the new anchor:
+  // depth-1 siblings share a level, root centred over them, no overlap.
+  const cfg = w.config;
+  const sibs = ['c1', 'c2', 'c3'].map(id => physics.findCard(w, id));
+  for (const c of sibs) assert.ok(Math.abs((c.y - root.y) - cfg.levelGap) < 30, `${c.id} at level 1`);
+  const xs = sibs.map(c => c.x);
+  assert.ok(Math.abs(root.x - (Math.min(...xs) + Math.max(...xs)) / 2) < 60, 'root centred over children');
+  let minD = Infinity;
+  for (let i = 0; i < w.cards.length; i++)
+    for (let j = i + 1; j < w.cards.length; j++)
+      minD = Math.min(minD, Math.hypot(w.cards[i].x - w.cards[j].x, w.cards[i].y - w.cards[j].y));
+  assert.ok(minD > 150, `cards never overlap: minD=${minD.toFixed(0)}`);
+  // the grandchild re-tidies at level 2 below its parent c1 (clean hierarchy).
+  assert.ok(Math.abs((g.y - c1.y) - cfg.levelGap) < 30, `grandchild below c1: ${g.y.toFixed(0)}`);
+});
+
+test('松手落点：拖根释放后根停在手放处，整棵树跟随不弹回', () => {
+  const w = makeWorld({ drift: false });
+  addCard(w, { id: 'root', x: 0, y: 0 });
+  addCard(w, { id: 'c1', x: 0, y: 0, parent: 'root' });
+  addCard(w, { id: 'c2', x: 0, y: 0, parent: 'root' });
+  const root = physics.findCard(w, 'root');
+  for (let i = 0; i < 800; i++) step(w); // settle so rootHome is parked
+  const rootBefore = { x: root.x, y: root.y };
+  const before = w.cards.map(c => ({ id: c.id, dx: c.x, dy: c.y }));
+  // Drag the root far away and drop it.
+  const drop = { x: root.x + 800, y: root.y - 500 };
+  root.x = drop.x; root.y = drop.y;
+  reanchorOnDrop(w, root);
+  w.dragId = null;
+  for (let i = 0; i < 1500; i++) step(w);
+  assert.ok(Math.hypot(root.x - drop.x, root.y - drop.y) < 8, `root stays where dropped: moved ${Math.hypot(root.x - drop.x, root.y - drop.y).toFixed(1)}px`);
+  // The whole tree followed by the same translation (offsets preserved).
+  for (const b of before) {
+    const c = physics.findCard(w, b.id);
+    assert.ok(Math.abs((c.x - root.x) - (b.dx - rootBefore.x)) < 25, `${b.id} kept its tree offset (x)`);
+    assert.ok(Math.abs((c.y - root.y) - (b.dy - rootBefore.y)) < 25, `${b.id} kept its tree offset (y)`);
+  }
 });

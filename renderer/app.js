@@ -853,12 +853,18 @@
     wakeBranch(card.id);
   }
 
-  // Called when the user lets go of a card. The tree re-settles into a tidy
-  // diagram: for a root drag the whole tree returns to its canonical home
-  // (rootHome), for a child drag its subtree stays where dropped and the rest
-  // re-tidies around it.
+  // Called when the user lets go of a card.
+  //
+  // KEY FIX (v0.5.1): the dragged card MUST stay where the user dropped it,
+  // and the rest of the tree re-flows around it — NOT spring back to the
+  // canonical diagram. Before this, drag only "unlocked" the subtree into the
+  // tree, but on release every unpinned card's target was still its canonical
+  // tidy position, so the whole board snapped back to rootHome (the bug the
+  // user reported as "松手都弹回去了"). reanchorOnDrop shifts rootHome so the
+  // dropped card's target equals its drop point; see physics.reanchorOnDrop.
   function onCardPlaced(card) {
     if (!card) return;
+    CardPhysics.reanchorOnDrop(world, card);
     world.dragId = null;
     markDirty();
   }

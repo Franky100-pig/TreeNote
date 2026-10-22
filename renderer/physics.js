@@ -178,10 +178,15 @@
         roots.push(c);
       }
     });
-    // Deterministic child order.
+    // Deterministic child order. IMPORTANT: order only by id, NEVER by the
+    // card's current x. If the order depended on live positions, dragging a
+    // node far would flip the packing order, change every node's offset (_ox),
+    // and feed back into the next layout — so a dropped card would drift off
+    // its anchor instead of holding still. Ordering by id makes the layout a
+    // pure function of tree structure, which is what `reanchorOnDrop` relies
+    // on to keep a dropped card exactly where it landed.
     byParent.forEach(function (kids) {
       kids.sort(function (a, b) {
-        if (Math.abs(a.x - b.x) > 1e-6) return a.x - b.x;
         return a.id < b.id ? -1 : (a.id > b.id ? 1 : 0);
       });
     });
@@ -279,21 +284,19 @@
 
     var dragged = world.dragId ? findCard(world, world.dragId) : null;
 
-    // Park the primary root's resting anchor. This must be a FIXED point, not
-    // refreshed every frame: if we set rootHome = root.position each idle step,
-    // the root's target becomes its own position (zero restoring force) and the
-    // whole tree drifts off under the soft repulsion. So we capture the root's
-    // position once on the first settle (so loaded boards keep their layout and
-    // fresh boards don't snap to the origin), then only refresh it when the root
-    // is already asleep — which is idempotent and keeps the tidy diagram put.
+    // Park the primary root's resting anchor ONCE, on the first step. This must
+    // be a FIXED point thereafter: if we re-anchored rootHome to the root's
+    // live position every idle frame, the root's target would chase its own
+    // position (zero restoring force) and the whole tree would drift. And if we
+    // refreshed it whenever the root happened to be asleep, we would clobber the
+    // shift that `reanchorOnDrop` applies on a card drop (the user's "keep it
+    // where I let go" gesture). So: set it once here, then only `reanchorOnDrop`
+    // is allowed to move rootHome. This keeps both the no-drift and the
+    // no-snap-back guarantees at the same time.
     var primaryRoot = world._roots && world._roots[0];
-    if (!dragged && primaryRoot) {
-      if (!world._rootHomeInit) {
-        world.rootHome = { x: primaryRoot.x, y: primaryRoot.y };
-        world._rootHomeInit = true;
-      } else if (primaryRoot.awake === false) {
-        world.rootHome = { x: primaryRoot.x, y: primaryRoot.y };
-      }
+    if (!dragged && primaryRoot && !world._rootHomeInit) {
+      world.rootHome = { x: primaryRoot.x, y: primaryRoot.y };
+      world._rootHomeInit = true;
     }
 
     // Base point for unpinned (non-dragged) roots.
@@ -435,6 +438,28 @@
   }
 
   /**
+   * Re-anchor the tidy-tree on a dropped card so it STAYS where the user let
+   * go and the rest of the tree re-flows around it — instead of the whole
+   * board springing back to the canonical home (the v0.5 "松手都弹回去了" bug).
+   *
+   * We shift `rootHome` by the difference between the card's canonical target
+   * (its tidy position relative to the current anchor) and its actual dropped
+   * position. After this, the card's target equals its drop point, so it holds
+   * still; every other card's target shifts by the same vector, so the tree
+   * re-tidies around the new anchor. Works for both root and child drags.
+   */
+  function reanchorOnDrop(world, card) {
+    if (!card || card.pinned) return;
+    computeTreeLayout(world);
+    var t = targetOf(world, card, null, world.rootHome);
+    world.rootHome = {
+      x: world.rootHome.x + (card.x - t.x),
+      y: world.rootHome.y + (card.y - t.y)
+    };
+    world._rootHomeInit = true;
+  }
+
+  /**
    * Total mechanical energy (KE + spring PE toward target + repulsion PE).
    * Used by the "damping dissipates energy" invariant test and the debug
    * overlay. Targets are recomputed first (they depend on position), with no
@@ -477,6 +502,7 @@
     targetOf: targetOf,
     step: step,
     wake: wake,
+    reanchorOnDrop: reanchorOnDrop,
     totalEnergy: totalEnergy,
     mulberry32: mulberry32
   };
