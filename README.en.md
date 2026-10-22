@@ -14,7 +14,7 @@ Name as many boards as you like and open any of them from the home screen.
 
 ## Home: named boards
 
-Press `H`, or open the top-right `?` **Guidance** panel and hit **Home**. Name a board as you create it, switch whenever you want; deleted boards go to the system trash, so a misclick is undoable.
+Press `H`, or open the top-right **Guidance** panel and hit **Home**. Name a board as you create it, switch whenever you want; deleted boards go to the system trash, so a misclick is undoable. **A newly created board opens with one blank, unnamed card in the middle**, ready to type into.
 
 ![home](docs/home.png)
 
@@ -26,7 +26,7 @@ Press `H`, or open the top-right `?` **Guidance** panel and hit **Home**. Name a
 
 | Action | Gesture |
 |---|---|
-| **Guidance** | Click the `?` at the top-right: a floating **Guidance** panel dims and **blurs + locks** the board behind it, listing every gesture and offering **Home / New board / Toggle theme**. `Esc` or ✕ closes it |
+| **Guidance** | Click **Guidance** at the top-right: a floating panel dims and **blurs + locks** the board behind it, listing every gesture and offering **Home / New board / Toggle theme**. `Esc` or ✕ closes it |
 | Home / open another board | `H`, or hit **Home** inside Guidance; click any card to open |
 | Rename the current board | Click the board name in Guidance's "Current board" section (or "rename" on a home card) |
 | Edit a card | Hover it → click ✎ on the action bar, **or just double-click** (Escape cancels, Enter commits) |
@@ -84,7 +84,7 @@ In tidy mode a card sits exactly on its tree target (the spring is zero and no o
 
 ### The top bar keeps just two buttons
 
-Since v0.7 the top bar does less on purpose: only **one-click tidy** and a `?` (**Guidance**) at the far right. Home, the board name, the hint text and the theme toggle all moved into the **Guidance** panel — pressing `?` floats it above the canvas, **blurs and locks the board behind it**, and only `Esc` / ✕ / an in-panel action dismisses it. The canvas stays clean and the main action stays one click away.
+Since v0.7 the top bar does less on purpose: only **one-click tidy** and a **Guidance** button at the far right. Home, the board name, the hint text and the theme toggle all moved into the **Guidance** panel — pressing it floats above the canvas, **blurs and locks the board behind it**, and only `Esc` / ✕ / an in-panel action dismisses it. The canvas stays clean and the main action stays one click away.
 
 **Every node belongs to the tree**: there is no "pin" exception anymore, so one-click tidy re-flows every card; in free mode each card simply holds where you left it.
 

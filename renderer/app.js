@@ -371,6 +371,20 @@
   function openBoardInto(board) {
     clearWorld();
     if (board && Array.isArray(board.cards)) seedCards(board.cards);
+    // A brand-new board (or a genuinely empty one) starts with ONE blank,
+    // unnamed card in the middle, so the canvas is never a dead void. The
+    // camera fit below centres it on screen; it is only persisted once the
+    // user edits it (openBoardInto does not mark the board dirty).
+    if (world.cards.length === 0) {
+      CardPhysics.addCard(world, {
+        id: 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+        x: 0,
+        y: 0,
+        parent: null,
+        title: '',
+        note: ''
+      });
+    }
     // Restore the tidy flag: a board saved while tidy reopens as a clean tree;
     // one saved while free reopens exactly where the user left it. A fresh
     // board (no saved flag) opens as a tidy tree — the standard layout.
@@ -1585,6 +1599,11 @@
       .then(function (created) {
         out.created = !!created && created.name === 'smoke test';
         out.opened = currentBoard.name === 'smoke test' && !homeVisible();
+        // A brand-new board must open with ONE blank, unnamed root card in the
+        // middle (so the canvas is never an empty void).
+        out.blankCard = world.cards.length === 1 &&
+          world.cards[0].title === '' && world.cards[0].note === '' &&
+          !world.cards[0].parent;
         return window.cardwall.listBoards();
       })
       .then(function (list) {
@@ -1609,8 +1628,9 @@
       .then(function (list) {
         out.listAfterDelete = list.length;
         out.ok = out.visible && out.cards >= 1 && out.created && out.opened &&
-          out.listAfterCreate === before + 1 && out.hasNew && out.renamed &&
-          out.renameVisible && out.deleted && out.listAfterDelete === before;
+          out.blankCard && out.listAfterCreate === before + 1 && out.hasNew &&
+          out.renamed && out.renameVisible && out.deleted &&
+          out.listAfterDelete === before;
         return out;
       });
   };

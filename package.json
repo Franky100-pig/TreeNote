@@ -1,6 +1,6 @@
 {
   "name": "cardwall",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "description": "力导向整齐树卡片墙笔记工具 — 自由拖拽每个节点、松手不回弹，一键整洁回到标准树；顶栏只留一键整洁 + 使用指南",
   "main": "main.js",
   "scripts": {

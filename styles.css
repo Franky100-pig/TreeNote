@@ -332,30 +332,27 @@ body {
 #guidance-btn {
   pointer-events: auto;
   margin-left: auto; /* sit at the far right, away from the tidy action */
-  width: 28px;
-  height: 28px;
   font: inherit;
-  font-size: 13px;
-  font-weight: 700;
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
   color: var(--muted);
   background: transparent;
-  border: 1px solid transparent;
-  border-radius: 50%;
+  border: 1px solid var(--surface-border);
+  border-radius: 8px;
+  padding: 6px 12px;
   cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
   transition: transform 90ms ease, background 120ms ease, color 120ms ease, border-color 120ms ease;
 }
 
 #guidance-btn:hover {
   color: var(--ink);
-  border-color: var(--surface-border);
+  border-color: var(--accent-soft-ring);
   background: var(--surface);
 }
 
 #guidance-btn:active {
-  transform: scale(0.88);
+  transform: scale(0.93);
 }
 
 /* ---- guidance: floating, blurred, modal help panel --------------------- */
