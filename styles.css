@@ -329,6 +329,30 @@ body {
   100% { transform: scale(1);    box-shadow: 0 0 0 0 rgba(201, 169, 80, 0); }
 }
 
+/* Quick "back to the library" right next to the main action; quiet by
+   default so 一键整洁 stays the visually dominant button. */
+#home-top-btn {
+  pointer-events: auto;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 6px 11px;
+  cursor: pointer;
+  transition: transform 90ms ease, background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+#home-top-btn:hover {
+  color: var(--ink);
+  border-color: var(--surface-border);
+  background: var(--surface);
+}
+
+#home-top-btn:active { transform: scale(0.93); }
+
 #guidance-btn {
   pointer-events: auto;
   margin-left: auto; /* sit at the far right, away from the tidy action */

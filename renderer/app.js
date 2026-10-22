@@ -639,6 +639,10 @@
     if (homeVisible()) showHome(false);
     else showHome(true);
   });
+  // The top bar's quick "返回首页" (next to 一键整洁): always opens the library.
+  // The library's own "← 返回当前图" button takes you back to the board.
+  var homeTopBtn = document.getElementById('home-top-btn');
+  if (homeTopBtn) homeTopBtn.addEventListener('click', function () { showHome(true); });
   // The top bar no longer carries a back arrow, so the library gets its own
   // visible "return to the current board" button.
   var homeBackBtn = document.getElementById('home-back');
@@ -1587,7 +1591,10 @@
   // one, so the reload check afterwards still finds the edited board.
   window.__cardwallHomeCheck = function () {
     var out = {};
-    homeBtn.click();
+    // Exercise the top-bar "返回首页" button (the one next to 一键整洁).
+    var topHome = document.getElementById('home-top-btn');
+    out.topHome = !!topHome;
+    (topHome || homeBtn).click();
     out.visible = !homeEl.hidden;
     var before = 0;
     return renderHome() // the overlay renders asynchronously; wait for it
@@ -1627,9 +1634,9 @@
       })
       .then(function (list) {
         out.listAfterDelete = list.length;
-        out.ok = out.visible && out.cards >= 1 && out.created && out.opened &&
-          out.blankCard && out.listAfterCreate === before + 1 && out.hasNew &&
-          out.renamed && out.renameVisible && out.deleted &&
+        out.ok = out.visible && out.topHome && out.cards >= 1 && out.created &&
+          out.opened && out.blankCard && out.listAfterCreate === before + 1 &&
+          out.hasNew && out.renamed && out.renameVisible && out.deleted &&
           out.listAfterDelete === before;
         return out;
       });
