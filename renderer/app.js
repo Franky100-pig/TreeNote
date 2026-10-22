@@ -804,24 +804,81 @@
     return card;
   }
 
-  // Pinned = free placement: no snap-back, no drift, no integration. Set by
-  // grabbing a card, flipped back by `P` so a card can rejoin the float.
+  // ---- pin semantics ----------------------------------------------------------------
+  //
+  // `pinned` means: this card was PLACED by the user and stays exactly where
+  // it was put. A pinned card opts out of every force — including the rope —
+  // so it neither drifts nor gets towed when its parent is dragged.
+  //
+  // That makes pinned a *protection* for cards the user has not touched, and
+  // the rule is:
+  //
+  //   new card           -> pinned (it stays where you clicked)
+  //   you drag a card    -> it and its whole subtree are UNPINNED for good
+  //                         (you have taken it into the physics; it belongs
+  //                          to the float now, and dragging its parent can
+  //                          tow it along)
+  //   P on a card        -> toggle it back, by hand, either way
+  //
+  // The subtree part matters: pinning is per card, but the rope is what
+  // carries a drag to the rest of the tree. Leaving the children pinned would
+  // mean "I can move this card but it drags nothing", which is exactly the
+  // "一个节点带不动别的节点" complaint.
+  function unpinSubtree(id) {
+    var card = CardPhysics.findCard(world, id);
+    if (!card) return;
+    // descendantsOf returns card objects, not ids.
+    var ids = [id].concat(descendantsOf(id).map(function (c) { return c.id; }));
+    ids.forEach(function (cid) {
+      var c = CardPhysics.findCard(world, cid);
+      if (!c || !c.pinned) return;
+      c.pinned = false;
+      c.hover = false;          // the pointer is on it right now
+      c.awake = true;           // don't wait for a force to wake it
+      c.still = 0;
+      var el = cardEls.get(cid);
+      if (el) el.classList.remove('pinned');
+    });
+  }
+
+  // Called when the user grabs a card: it rejoins the float, permanently.
+  function onGrab(card) {
+    if (!card) return;
+    unpinSubtree(card.id);
+    wakeBranch(card.id);
+  }
+
+  // Called when the user lets go of a card. The card keeps the position it
+  // was dropped at (no snap-back) but is free to be towed by a later drag.
+  function onCardPlaced(card) {
+    if (!card) return;
+    markDirty();
+  }
+
+  // Pinned = free placement: no snap-back, no drift, no integration. Flipped
+  // by `P` so a card can rejoin (or leave) the float by hand.
   function togglePin(id) {
     var card = CardPhysics.findCard(world, id);
     if (!card) return null;
-    card.pinned = !card.pinned;
-    if (card.pinned) { card.vx = 0; card.vy = 0; }
-    else {
+    if (card.pinned) {
       // Rejoining the float: wake, don't wait for a force to exceed the
       // threshold. Clearing `hover` is essential — the pointer is resting on
       // the card exactly when you press P (that is how it got selected), and
       // the integrator freezes hovered cards so the toolbar stays clickable.
       // Without this the card stays welded in place until the mouse leaves,
       // which reads as "P does nothing".
+      //
+      // The subtree comes along: a card that rejoins the float but whose
+      // children stay pinned is still a card that cannot be dragged around
+      // by its parent.
+      unpinSubtree(id);
       card.hover = false;
       wakeBranch(card.id);
+    } else {
+      card.pinned = true;
+      card.vx = 0; card.vy = 0;
     }
-    var el = cardEls.get(card.id);
+    var el = cardEls.get(id);
     if (el) el.classList.toggle('pinned', card.pinned);
     markDirty();
     syncDOM();
@@ -1138,10 +1195,10 @@
     applyView: applyView,
     syncDOM: syncDOM,
     onUserInteract: onUserInteract,
-    onCardPlaced: markDirty,
+    onCardPlaced: onCardPlaced,
     onCardDropped: reparent,
     cardAt: cardAt,
-    onGrab: function (card) { wakeBranch(card.id); },
+    onGrab: onGrab,
     raise: raise,
     findCard: function (id) { return CardPhysics.findCard(world, id); }
   });
@@ -1184,41 +1241,82 @@
     };
 
     // 3. card drag: grab the first card, move +80px, release.
-    //    Free placement: the card pins on grab and keeps the drop position
-    //    exactly (no spring, no inertia). The branch is NOT translated with
-    //    the pointer any more — it is pulled along by the springs, so it
-    //    trails behind and floats into place instead of moving as a slab.
+    //    The branch is NOT translated with the pointer — it is towed by the
+    //    ropes, so it trails behind and floats into place.
     var cardEl = document.querySelector('.card');
     var card = CardPhysics.findCard(world, cardEl.dataset.id);
     var sub = descendantsOf(card.id);
+    // Pin the whole tree first, the way a real board looks: the sample tree
+    // starts unpinned, and an unpinned tree would pass this check even with
+    // the unpins-subtree fix reverted. A pinned tree is the case that
+    // actually broke ("one node does not carry the others").
+    world.cards.forEach(function (c) {
+      c.pinned = true;
+      c.awake = true;
+      c.still = 0;
+    });
     var before = [card].concat(sub).map(function (c) { return { c: c, x: c.x, y: c.y }; });
     var rect = cardEl.getBoundingClientRect();
     var cx = rect.left + rect.width / 2, cy = rect.top + rect.height / 2;
     var start = { x: card.x, y: card.y };
     fire('pointerdown', cardEl, cx, cy);
     fire('pointermove', cardEl, cx + 40, cy);
+    // Step the physics while the card is still held: the branch is towed by
+    // the rope, and that only shows up once the integrator has run. (The
+    // synthetic pointer events do not advance the rAF loop, so we step it
+    // by hand here.)
+    for (var d1 = 0; d1 < 30; d1++) CardPhysics.step(world);
+    var towedDuringDrag = sub.map(function (s) {
+      var b = before.filter(function (e) { return e.c === s; })[0];
+      return Math.round(Math.hypot(s.x - b.x, s.y - b.y));
+    });
     fire('pointermove', cardEl, cx + 80, cy);
+    for (var d2 = 0; d2 < 30; d2++) CardPhysics.step(world);
     fire('pointerup', cardEl, cx + 80, cy);
     var dropped = { x: card.x, y: card.y };
     var movedBy = card.x - start.x; // 80 screen px expressed in world units
-    // Nothing was carried by the pointer: at drop time the branch has not
-    // moved at all (only the grabbed card did).
-    var floaty = sub.every(function (s) {
-      var b = before.filter(function (e) { return e.c === s; })[0];
-      return Math.hypot(s.x - b.x, s.y - b.y) < 1e-9;
-    });
-    // 240 physics steps with drift on: the pinned card must not budge by an
-    // epsilon, while every card in its branch floats after it and settles
-    // back inside its ring around the new position.
+    // New pin semantics: grabbing a card hands it AND its whole subtree back
+    // to the force field, permanently. This is the fix for "one node does not
+    // carry the others": a pinned card opts out of every force, including the
+    // rope, so a pinned subtree could never be towed.
+    var subtreeUnpinned = sub.every(function (s) { return s.pinned === false; }) &&
+      card.pinned === false;
+    // The branch was actually TOWED: at least half of it travelled a real
+    // distance while the card was held. This is the assertion that would
+    // have failed before the fix (a pinned subtree travels 0px).
+    var towed = towedDuringDrag.filter(function (t) { return t > 20; }).length;
+    var towedEnough = towed >= Math.max(1, Math.ceil(sub.length / 2));
+    // The pointer moves the grabbed card only — the branch is moved by the
+    // physics on the next tick, never by the pointer.
+    // 240 physics steps with drift on. The dragged card is handed back to the
+    // force field — the rope pulls it to its own length (a root card back to
+    // its radius around the world origin) instead of staying welded where you
+    // dropped it. The branch floats after it and settles into the same
+    // geometry around the new position.
     for (var s1 = 0; s1 < 240; s1++) CardPhysics.step(world);
-    var heldStill = Math.abs(card.x - dropped.x) < 1e-9 && Math.abs(card.y - dropped.y) < 1e-9;
-    // Every card in the branch travelled, and it came to rest at roughly the
-    // same distance from the grabbed card as before (same geometry, reached
-    // by floating rather than by a rigid offset).
+    // The dragged card ended up ON its rope. A root card is moored to the
+    // world origin with rope length = its ring radius, so it comes to rest
+    // at that radius from the origin (a child would rest at rope length
+    // from its parent).
+    // computeAnchors() fills world.anchors in place; it returns nothing.
+    CardPhysics.computeAnchors(world);
+    var rootAnchor = world.anchors.get(card.id);
+    var ropeLen = rootAnchor ? rootAnchor.ringR : 0;
+    var tetherX = rootAnchor && rootAnchor.parentId
+      ? (CardPhysics.findCard(world, rootAnchor.parentId) || { x: 0, y: 0 }).x
+      : 0;
+    var tetherY = rootAnchor && rootAnchor.parentId
+      ? (CardPhysics.findCard(world, rootAnchor.parentId) || { x: 0, y: 0 }).y
+      : 0;
+    var distToTether = Math.hypot(card.x - tetherX, card.y - tetherY);
+    var heldStill = Math.abs(distToTether - ropeLen) < 60;
+    // Where each branch card ended up relative to the grabbed card. The
+    // geometry should be roughly preserved: reached by floating along the
+    // ropes, not by a rigid offset.
     var followDetail = sub.map(function (s) {
       var b = before.filter(function (e) { return e.c === s; })[0];
       return {
-        travel: Math.round(Math.hypot(s.x - b.x, s.y - b.y)),
+        travel: towedDuringDrag[sub.indexOf(s)],
         toCard: Math.round(Math.hypot(s.x - card.x, s.y - card.y)),
         was: Math.round(Math.hypot(b.x - start.x, b.y - start.y))
       };
@@ -1232,29 +1330,54 @@
     var moved = followDetail.filter(function (d) { return d.travel > 20; }).length;
     var followed = moved >= Math.max(1, Math.ceil(sub.length / 2)) &&
       followDetail.every(function (d) { return Math.abs(d.toCard - d.was) < 260; });
-    // Unpin must work with the pointer STILL ON the card — that is the real
+    // P must work with the pointer STILL ON the card — that is the real
     // gesture (click to select, then press P). A hovered card is frozen by
     // the integrator so its toolbar stays clickable, so togglePin has to
     // clear `hover`; otherwise P looks dead until the mouse moves away.
     // This goes through the real key handler, not togglePin directly.
+    //
+    // Under the new semantics the card is already unpinned (the drag handed
+    // it to the force field), so P PINS it: it must stop moving even with
+    // the pointer on it. Then P again releases it and it must move again.
     select(card.id);
     card.hover = true; // pointer resting on the card (what mouseenter would set)
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'p', bubbles: true, cancelable: true }));
-    var pinNow = card.pinned; // flipped to false by the key press
+    var pinNow = card.pinned;               // P pinned it
+    var posAtPin = { x: card.x, y: card.y };
     for (var s2 = 0; s2 < 60; s2++) CardPhysics.step(world);
-    var floatsAgain = Math.hypot(card.x - dropped.x, card.y - dropped.y) > 1;
-    // Restore the whole branch and leave the grabbed card pinned+placed, so
-    // later checks and the persisted board see a deterministic layout.
+    var pinnedHolds = Math.hypot(card.x - posAtPin.x, card.y - posAtPin.y) < 1;
+    // P again: back into the float, and it must start moving. Nudge it off
+    // its equilibrium first — a card that is already exactly at its rope
+    // length is in balance, so releasing it there legitimately moves nothing.
+    card.hover = true;
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'p', bubbles: true, cancelable: true }));
+    var unpinnedNow = card.pinned === false;
+    card.x += 60; card.y += 30; // off-balance, so the rope has work to do
+    var posAtRelease = { x: card.x, y: card.y };
+    for (var s3 = 0; s3 < 60; s3++) CardPhysics.step(world);
+    var floatsAgain = Math.hypot(card.x - posAtRelease.x, card.y - posAtRelease.y) > 1;
+    // Restore the whole branch and leave the grabbed card where it was
+    // dropped, so later checks and the persisted board see a deterministic
+    // layout.
     before.forEach(function (e) { e.c.x = e.x; e.c.y = e.y; });
     card.vx = 0;
     card.vy = 0;
-    togglePin(card.id);
+    // New pin semantics: a card you have dragged has LEFT the pinned state
+    // for good (it belongs to the float now, and a later drag of its parent
+    // can tow it). P is the manual override in the other direction.
+    var unpinnedByDrag = subtreeUnpinned;
+    card.pinned = true; // restore the fixture for the rest of the smoke run
+    sub.forEach(function (s) { s.pinned = true; });
     var drag = {
-      ok: !card.dragging && movedBy > 60 && card.pinned && card.vx === 0 &&
-        heldStill && floaty && followed && pinNow === false && floatsAgain,
+      ok: !card.dragging && movedBy > 60 && card.vx === 0 &&
+        heldStill && towedEnough && followed &&
+        pinNow === true && pinnedHolds && unpinnedNow && floatsAgain &&
+        unpinnedByDrag,
       moved: movedBy, vx: card.vx, dragging: card.dragging, branch: sub.length,
-      pinned: card.pinned, heldStill: heldStill, floaty: floaty,
-      followed: followed, follow: followDetail, floatsAgain: floatsAgain
+      pinned: card.pinned, heldStill: heldStill,
+      towed: towedDuringDrag, towedEnough: towedEnough,
+      followed: followed, follow: followDetail, floatsAgain: floatsAgain,
+      unpinnedByDrag: unpinnedByDrag, pinnedHolds: pinnedHolds
     };
 
     // 4. clamp: wheel all the way out then all the way in stays in range

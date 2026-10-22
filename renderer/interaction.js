@@ -66,13 +66,14 @@
         raise(cardEl); // raise to top of paint order
         cardEl.classList.add('dragging');
         card.dragging = true;
-        // Pin on grab: the card stops drifting the instant you touch it and
-        // keeps whatever position the drop lands on.
-        card.pinned = true;
         card.vx = 0;
         card.vy = 0;
         // Wake the branch so it starts floating right away instead of
         // sitting frozen until the force grows past the sleep threshold.
+        //
+        // This is also where the card (and its subtree) leaves the pinned
+        // state: the user has taken it into the physics, so from now on a
+        // drag of its parent can tow it along. See `onGrab` in app.js.
         onGrab(card);
         // Grab offset: the card keeps the exact point you grabbed it by, so
         // it does not jump its centre to the cursor (Obsidian behaviour).
