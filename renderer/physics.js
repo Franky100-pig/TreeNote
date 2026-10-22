@@ -58,6 +58,13 @@
     // critical damping coefficient = 2*sqrt(k) -> eases to target in ~0.6s,
     // no overshoot. This is the core "arrange into a tree" behaviour.
     k: 40,                 // spring stiffness to the tree target (px/s^2 per px)
+    // Global viscous decay (air drag) applied to EVERY free-moving card each
+    // step, independent of the spring. The spring's own damping term is gated
+    // inside the tidy/drag pull loop, so on a FREE board (no pull) a card that
+    // was released with residual velocity would otherwise coast forever — the
+    // "node stops but everything else keeps drifting" bug. Air drag always
+    // acts, so residual velocity always decays and the card can fall asleep.
+    globalDamp: 3.0,       // 1/s: velocity halves every ~0.23s; settled within ~1s
     maxSpeed: 3000,        // velocity cap (px/s)
 
     // Tidy-tree geometry (Reingold–Tilford style, leaf-packing variant).
@@ -315,8 +322,9 @@
       anchor = world.rootHome;
     }
 
-    // 1. zero forces
-    for (var i = 0; i < n; i++) { cards[i].fx = 0; cards[i].fy = 0; }
+    // 1. zero forces (and clear the per-card "is this card being pulled by the
+    //    spring this step" flag, set again in section 3 if so).
+    for (var i = 0; i < n; i++) { cards[i].fx = 0; cards[i].fy = 0; cards[i]._inPull = false; }
 
     // 2. soft repulsion — an anti-overlap GUARD that only matters while a card
     //    is being dragged (a dragged card can be shoved into a neighbour). At
@@ -363,6 +371,7 @@
         // Damped harmonic oscillator, mass = 1: a = k*(target - x) - cDamp*v
         card.fx += cfg.k * (t.x - card.x) - cDamp * card.vx;
         card.fy += cfg.k * (t.y - card.y) - cDamp * card.vy;
+        card._inPull = true; // this card is damped by the spring term above
       }
     }
 
@@ -415,12 +424,18 @@
     }
 
     // 7. integrate (dragged, pinned, hovered and sleeping cards are positioned
-    //    externally or intentionally still).
+    //    externally or intentionally still). A card that the spring is pulling
+    //    (section 3) is already damped by the `- cDamp*v` term in that force,
+    //    so we leave it be. Every OTHER free-moving card gets a global viscous
+    //    decay so any residual velocity (from a just-released drag, a drag wake,
+    //    or repulsion) bleeds off instead of coasting forever on a free board.
+    var decay = Math.exp(-cfg.globalDamp * dt);
     for (var k = 0; k < n; k++) {
       var q = cards[k];
       if (q.dragging || q.pinned || q.hover || !q.awake) { q.vx = 0; q.vy = 0; continue; }
       q.vx += q.fx * dt;
       q.vy += q.fy * dt;
+      if (!q._inPull) { q.vx *= decay; q.vy *= decay; }
       var sp = Math.sqrt(q.vx * q.vx + q.vy * q.vy);
       if (sp > cfg.maxSpeed) {
         q.vx = q.vx / sp * cfg.maxSpeed;

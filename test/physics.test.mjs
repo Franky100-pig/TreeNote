@@ -302,3 +302,38 @@ test('一键整洁：自由摆放的卡片被重新排成整齐树', () => {
       minD = Math.min(minD, Math.hypot(w.cards[i].x - w.cards[j].x, w.cards[i].y - w.cards[j].y));
   assert.ok(minD > 150, `cards never overlap: minD=${minD.toFixed(0)}`);
 });
+
+test('松手后无阻尼滑行：自由态下别的节点残余速度必须衰减归零（修"一直往下漂"）', () => {
+  const w = makeWorld({ drift: false });
+  w.tidy = true; // 载入即整齐树；拖拽时整棵树被拉力带动
+  addCard(w, { id: 'root', x: 0, y: 0 });
+  addCard(w, { id: 'c1', x: 0, y: 0, parent: 'root' });
+  addCard(w, { id: 'c2', x: 0, y: 0, parent: 'root' });
+  addCard(w, { id: 'c3', x: 0, y: 0, parent: 'root' });
+  const root = physics.findCard(w, 'root');
+  const c2 = physics.findCard(w, 'c2');
+  for (let i = 0; i < 800; i++) step(w); // 先收敛成整齐树
+  // 模拟拖拽 c2 并移动（像指针那样）：c2 被 external 定位，其余被拉力/倾斜带着动
+  c2.dragging = true;
+  w.dragId = 'c2';
+  c2.x = 700; c2.y = 500;
+  for (let i = 0; i < 60; i++) step(w); // 这一步会给 root/c1/c3 注入残余速度
+  const maxResidual = Math.max(
+    ...w.cards.filter(c => c.id !== 'c2').map(c => Math.hypot(c.vx, c.vy))
+  );
+  assert.ok(maxResidual > 5, `拖拽确实让别的节点产生了残余速度（${maxResidual.toFixed(1)} px/s）——否则本测试无意义`);
+  // 松手：interaction.endPointer 会清零被抓卡的速度并令整面自由
+  c2.dragging = false;
+  c2.vx = 0; c2.vy = 0;
+  w.dragId = null;
+  w.tidy = false;
+  const atRelease = w.cards.map(c => ({ c, x: c.x, y: c.y }));
+  for (let i = 0; i < 2000; i++) step(w);
+  // 1) 所有卡速度必须衰减到接近 0（不再匀速滑行）
+  const maxSpeed = Math.max(...w.cards.map(c => Math.hypot(c.vx, c.vy)));
+  assert.ok(maxSpeed < 1, `松手后所有节点速度收敛归零: maxSpeed=${maxSpeed.toFixed(3)} px/s`);
+  // 2) 每张卡停在落点附近，没有无限漂移（位置有界）
+  let maxDrift = 0;
+  for (const b of atRelease) maxDrift = Math.max(maxDrift, Math.hypot(b.c.x - b.x, b.c.y - b.y));
+  assert.ok(maxDrift < 10, `松手后所有节点停在落点附近（不再漂走）: maxDrift=${maxDrift.toFixed(1)}px`);
+});
