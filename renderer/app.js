@@ -43,8 +43,7 @@
         y: item.y,
         parent: item.parent || null,
         title: item.title,
-        note: item.note || '',
-        pinned: item.pinned
+        note: item.note || ''
       });
     });
   }
@@ -54,7 +53,7 @@
 
   function buildCardEl(card) {
     var el = document.createElement('div');
-    el.className = 'card' + (card.parent ? '' : ' card-root') + (card.pinned ? ' pinned' : '');
+    el.className = 'card' + (card.parent ? '' : ' card-root');
     el.dataset.id = card.id;
     var title = document.createElement('div');
     title.className = 'card-title';
@@ -204,8 +203,7 @@
           note: c.note,
           x: c.x,
           y: c.y,
-          parent: c.parent || null,
-          pinned: !!c.pinned
+          parent: c.parent || null
         };
       })
     };
@@ -627,6 +625,12 @@
     if (homeVisible()) showHome(false);
     else showHome(true);
   });
+  // The top bar no longer carries a back arrow, so the library gets its own
+  // visible "return to the current board" button.
+  var homeBackBtn = document.getElementById('home-back');
+  if (homeBackBtn) homeBackBtn.addEventListener('click', function () {
+    if (currentBoard.id) showHome(false);
+  });
   boardNameEl.addEventListener('click', function () {
     if (currentBoard.id) renameBoardById(currentBoard.id, currentBoard.name);
   });
@@ -638,6 +642,30 @@
       createBoardWithName(name);
     });
   });
+
+  // ---- Guidance panel ------------------------------------------------------------
+  // The old top-bar clutter (home / board name / hints / theme) collapses into one
+  // floating, blurred, MODAL help surface. Opening it blurs + locks the board
+  // behind it; only Escape or the close affordance dismiss it. It owns the
+  // keyboard while open (see the keydown handler above).
+  var guidanceEl = document.getElementById('guidance');
+  var guidanceBtn = document.getElementById('guidance-btn');
+  var guidanceClose = document.getElementById('guidance-close');
+  var guidanceBackdrop = guidanceEl ? guidanceEl.querySelector('.guidance-backdrop') : null;
+
+  function openGuidance() { if (guidanceEl) guidanceEl.hidden = false; }
+  function closeGuidance() { if (guidanceEl) guidanceEl.hidden = true; }
+
+  if (guidanceBtn) guidanceBtn.addEventListener('click', openGuidance);
+  if (guidanceClose) guidanceClose.addEventListener('click', closeGuidance);
+  if (guidanceBackdrop) guidanceBackdrop.addEventListener('click', closeGuidance);
+  // Leaving Guidance (via its own actions, or the home button inside it) must
+  // reveal whatever it was covering rather than leave the board blurred.
+  homeBtn.addEventListener('click', closeGuidance);
+  var guidanceNew = document.getElementById('guidance-new');
+  if (guidanceNew) guidanceNew.addEventListener('click', function () { closeGuidance(); newBoardBtn.click(); });
+  var guidanceTheme = document.getElementById('guidance-theme');
+  if (guidanceTheme) guidanceTheme.addEventListener('click', function () { toggleTheme(); });
 
   // ---- card editing (C5): selection, inline edit, create, delete ------------
   var selectedId = null;
@@ -815,8 +843,7 @@
       y: pos.y,
       parent: parent,
       title: '',
-      note: '',
-      pinned: false // joins the float / free placement
+      note: ''
     });
     var el = buildCardEl(card);
     worldEl.appendChild(el);
@@ -830,50 +857,14 @@
     return card;
   }
 
-  // ---- pin semantics ----------------------------------------------------------------
-  //
-  // `pinned` means: this card was PLACED by the user and stays exactly where
-  // it was put. A pinned card opts out of every force — including the rope —
-  // so it neither drifts nor gets towed when its parent is dragged.
-  //
-  // That makes pinned a *protection* for cards the user has not touched, and
-  // the rule is:
-  //
-  //   new card           -> pinned (it stays where you clicked)
-  //   you drag a card    -> it and its whole subtree are UNPINNED for good
-  //                         (you have taken it into the physics; it belongs
-  //                          to the float now, and dragging its parent can
-  //                          tow it along)
-  //   P on a card        -> toggle it back, by hand, either way
-  //
-  // The subtree part matters: pinning is per card, but the rope is what
-  // carries a drag to the rest of the tree. Leaving the children pinned would
-  // mean "I can move this card but it drags nothing", which is exactly the
-  // "一个节点带不动别的节点" complaint.
-  function unpinSubtree(id) {
-    var card = CardPhysics.findCard(world, id);
-    if (!card) return;
-    // descendantsOf returns card objects, not ids.
-    var ids = [id].concat(descendantsOf(id).map(function (c) { return c.id; }));
-    ids.forEach(function (cid) {
-      var c = CardPhysics.findCard(world, cid);
-      if (!c || !c.pinned) return;
-      c.pinned = false;
-      c.hover = false;          // the pointer is on it right now
-      c.awake = true;           // don't wait for a force to wake it
-      c.still = 0;
-      var el = cardEls.get(cid);
-      if (el) el.classList.remove('pinned');
-    });
-  }
-
-  // Called when the user grabs a card: it rejoins the float, permanently, and
-  // the physics re-lays the tree out around it (root drag -> whole tree
-  // follows; child drag -> its subtree re-flows at the cursor).
+  // Called when the user grabs a card: it (and its branch) comes alive so the
+  // physics re-lays the tree out around it (root drag -> whole tree follows;
+  // child drag -> its subtree re-flows at the cursor). There is no "pin" — every
+  // card belongs to the float and the tidy pull is opt-in, so a free card simply
+  // holds where the user dropped it until tidy is engaged.
   function onGrab(card) {
     if (!card) return;
     world.dragId = card.id;
-    unpinSubtree(card.id);
     wakeBranch(card.id);
   }
 
@@ -892,43 +883,26 @@
   }
 
   // "一键整洁": re-flow the whole board into the standard tidy tree. This is
-  // the ONLY thing that imposes the tree on a free board (v0.6 model).
+  // the ONLY thing that imposes the tree on a free board (v0.6 model). With the
+  // pin feature gone, every card obeys the pull, so a scattered board visibly
+  // snaps back into the clean diagram — and we add a transient "整理中…" label
+  // + a pulse so the press always reads as having done something.
+  var tidyBtnTimer = null;
   function tidyAll() {
     CardPhysics.tidy(world);
     // wake every card so the spring actually moves it (dormant cards freeze).
     world.cards.forEach(function (c) { c.awake = true; c.still = 0; });
     markDirty();
     syncDOM();
-  }
-
-  // Pinned = free placement: no snap-back, no drift, no integration. Flipped
-  // by `P` so a card can rejoin (or leave) the float by hand.
-  function togglePin(id) {
-    var card = CardPhysics.findCard(world, id);
-    if (!card) return null;
-    if (card.pinned) {
-      // Rejoining the float: wake, don't wait for a force to exceed the
-      // threshold. Clearing `hover` is essential — the pointer is resting on
-      // the card exactly when you press P (that is how it got selected), and
-      // the integrator freezes hovered cards so the toolbar stays clickable.
-      // Without this the card stays welded in place until the mouse leaves,
-      // which reads as "P does nothing".
-      //
-      // The subtree comes along: a card that rejoins the float but whose
-      // children stay pinned is still a card that cannot be dragged around
-      // by its parent.
-      unpinSubtree(id);
-      card.hover = false;
-      wakeBranch(card.id);
-    } else {
-      card.pinned = true;
-      card.vx = 0; card.vy = 0;
+    if (tidyBtn) {
+      tidyBtn.classList.add('tidying');
+      tidyBtn.textContent = '整理中…';
+      if (tidyBtnTimer) clearTimeout(tidyBtnTimer);
+      tidyBtnTimer = setTimeout(function () {
+        tidyBtn.classList.remove('tidying');
+        tidyBtn.textContent = '一键整洁';
+      }, 750);
     }
-    var el = cardEls.get(id);
-    if (el) el.classList.toggle('pinned', card.pinned);
-    markDirty();
-    syncDOM();
-    return card.pinned;
   }
 
   function deleteCard(id) {
@@ -1070,6 +1044,13 @@
       toggleTheme(); // works while editing too
       return;
     }
+    // The Guidance panel is a modal: while it is open, only Escape closes it and
+    // every other shortcut is locked so the blurred board behind cannot be driven.
+    var guidanceElRef = document.getElementById('guidance');
+    if (guidanceElRef && !guidanceElRef.hidden) {
+      if (e.key === 'Escape') { e.preventDefault(); closeGuidance(); }
+      return;
+    }
     // The dialog and the home screen own the keyboard while they are up.
     if (!dialogEl.hidden) {
       if (e.key === 'Escape') { e.preventDefault(); closeDialog(null); }
@@ -1094,9 +1075,6 @@
     } else if ((e.key === 't' || e.key === 'T')) {
       e.preventDefault();
       tidyAll();
-    } else if ((e.key === 'p' || e.key === 'P') && selectedId) {
-      e.preventDefault();
-      togglePin(selectedId);
     } else if (e.key === 'Escape' && selectedId) {
       select(null);
     }
@@ -1290,22 +1268,14 @@
       scaleBefore: before.scale, scaleAfter: after.scale
     };
 
-    // 3. card drag + one-click tidy (v0.6 model).
+    // 3. card drag + one-click tidy (free-placement model).
     //    Drag gives FULL FREEDOM: grab a card and its subtree follows the
     //    cursor, but on release nothing snaps back — the board stays where you
-    //    let go. The tidy tree is rebuilt only by the "一键整洁" button.
+    //    let go. The tidy tree is rebuilt only by the "一键整洁" button, and
+    //    with no pin concept every card obeys that pull.
     var cardEl = document.querySelector('.card');
     var card = CardPhysics.findCard(world, cardEl.dataset.id);
     var sub = descendantsOf(card.id);
-    // Pin the whole tree first, the way a real board looks: the sample tree
-    // starts unpinned, and an unpinned tree would pass this check even with
-    // the unpins-subtree fix reverted. A pinned tree is the case that
-    // actually broke ("one node does not carry the others").
-    world.cards.forEach(function (c) {
-      c.pinned = true;
-      c.awake = true;
-      c.still = 0;
-    });
     var beforeAll = world.cards.map(function (c) { return { c: c, x: c.x, y: c.y }; });
     var before = [card].concat(sub).map(function (c) { return { c: c, x: c.x, y: c.y }; });
     var rect = cardEl.getBoundingClientRect();
@@ -1326,12 +1296,6 @@
     for (var d2 = 0; d2 < 30; d2++) CardPhysics.step(world);
     fire('pointerup', cardEl, cx + 80, cy);
     var movedBy = card.x - start.x; // ~80 screen px expressed in world units
-    // New pin semantics: grabbing a card hands it AND its whole subtree back
-    // to the force field, permanently. This is the fix for "one node does not
-    // carry the others": a pinned card opts out of every force, including the
-    // tree pull, so a pinned subtree could never be towed.
-    var subtreeUnpinned = sub.every(function (s) { return s.pinned === false; }) &&
-      card.pinned === false;
     // The branch was actually TOWED: at least half of it travelled a real
     // distance while the card was held.
     var towed = towedDuringDrag.filter(function (t) { return t > 20; }).length;
@@ -1343,9 +1307,9 @@
     var heldStill = Math.hypot(card.vx, card.vy) < 1;
 
     // "一键整洁": re-tree the WHOLE board — the only thing that imposes the
-    // tree on a free board. With everything unpinned and tidy engaged, the
-    // spring pulls every card into the canonical tidy diagram.
-    world.cards.forEach(function (c) { c.pinned = false; c.awake = true; c.still = 0; });
+    // tree on a free board. With no pin concept, every card obeys the pull and
+    // the spring draws the whole diagram into its canonical tidy layout.
+    world.cards.forEach(function (c) { c.awake = true; c.still = 0; });
     CardPhysics.tidy(world);
     for (var s2 = 0; s2 < 400; s2++) CardPhysics.step(world);
     function depthOf(c) {
@@ -1373,45 +1337,22 @@
     }
     var followed = level1ok && level2ok && spread > 350 && noOverlap;
 
-    // P works while the tree is held (tidy on): pin freezes, unpin re-floats.
-    select(card.id);
-    card.hover = true; // pointer resting on the card (what mouseenter would set)
-    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'p', bubbles: true, cancelable: true }));
-    var pinNow = card.pinned;               // P pinned it
-    var posAtPin = { x: card.x, y: card.y };
-    for (var s3 = 0; s3 < 60; s3++) CardPhysics.step(world);
-    var pinnedHolds = Math.hypot(card.x - posAtPin.x, card.y - posAtPin.y) < 1;
-    // P again: back into the float, and it must start moving. Nudge it off
-    // its equilibrium first — a card already at its tree target is in
-    // balance, so releasing it there legitimately moves nothing.
-    card.hover = true;
-    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'p', bubbles: true, cancelable: true }));
-    var unpinnedNow = card.pinned === false;
-    card.x += 60; card.y += 30; // off-balance, so the tidy pull has work to do
-    var posAtRelease = { x: card.x, y: card.y };
-    for (var s4 = 0; s4 < 60; s4++) CardPhysics.step(world);
-    var floatsAgain = Math.hypot(card.x - posAtRelease.x, card.y - posAtRelease.y) > 1;
-
     // Restore the whole board to its pre-check snapshot so later checks and
     // the persisted board see a deterministic layout.
     beforeAll.forEach(function (e) { e.c.x = e.x; e.c.y = e.y; });
-    world.cards.forEach(function (c) { c.pinned = true; c.awake = true; c.still = 0; });
+    world.cards.forEach(function (c) { c.awake = true; c.still = 0; });
     world.tidy = false;
     card.vx = 0;
     card.vy = 0;
-    var unpinnedByDrag = subtreeUnpinned;
     var drag = {
       ok: !card.dragging && movedBy > 60 &&
         Math.abs(card.vx) < 0.5 && Math.abs(card.vy) < 0.5 &&
-        heldStill && towedEnough && followed &&
-        pinNow === true && pinnedHolds && unpinnedNow && floatsAgain &&
-        unpinnedByDrag,
+        heldStill && towedEnough && followed,
       moved: movedBy, vx: card.vx, vy: card.vy, dragging: card.dragging, branch: sub.length,
-      pinned: card.pinned, heldStill: heldStill,
+      heldStill: heldStill,
       towed: towedDuringDrag, towedEnough: towedEnough,
       followed: followed, level1ok: level1ok, level2ok: level2ok,
-      spread: Math.round(spread), noOverlap: noOverlap,
-      floatsAgain: floatsAgain, unpinnedByDrag: unpinnedByDrag, pinnedHolds: pinnedHolds
+      spread: Math.round(spread), noOverlap: noOverlap
     };
 
     // 4. clamp: wheel all the way out then all the way in stays in range
@@ -1422,6 +1363,31 @@
     var clamp = { ok: maxScale <= 2.5 + 1e-9 && minScale >= 0.2 - 1e-9, maxScale: maxScale, minScale: minScale };
 
     return { pan: pan, zoom: zoom, drag: drag, clamp: clamp, ok: pan.ok && zoom.ok && drag.ok && clamp.ok };
+  };
+
+  // ---- guidance check hook -----------------------------------------------------
+  // The top-bar clutter now lives in one floating, blurred, modal "Guidance"
+  // panel. Verify it opens, blurs the board, is a modal (has the backdrop and
+  // the close affordance), and closes again.
+  window.__cardwallGuidanceCheck = function () {
+    var g = document.getElementById('guidance');
+    var btn = document.getElementById('guidance-btn');
+    var closeBtn = document.getElementById('guidance-close');
+    var backdrop = g && g.querySelector('.guidance-backdrop');
+    var opened = false, closed = false, blurred = false;
+    if (btn) { btn.click(); opened = !!g && !g.hidden; }
+    if (backdrop) {
+      var cs = getComputedStyle(backdrop);
+      var bf = cs.backdropFilter || cs.webkitBackdropFilter || '';
+      blurred = /blur\(/.test(bf);
+    }
+    var hasHome = !!document.getElementById('home-btn');
+    if (closeBtn) { closeBtn.click(); closed = !!g && g.hidden; }
+    return {
+      ok: opened && closed && blurred && !!backdrop && hasHome,
+      opened: opened, closed: closed, blurred: blurred,
+      hasBackdrop: !!backdrop, hasHome: hasHome
+    };
   };
 
   // ---- editor check hook -------------------------------------------------------
@@ -1581,12 +1547,22 @@
     var delOk = !!childEl && world.cards.length === idsBefore.length &&
       !cardEls.has(newId) && !edgeEls.has(newId);
 
+    // 一键整洁: pressing it engages tidy AND gives immediate visual feedback
+    // (the tidying pulse class + the transient "整理中…" label).
+    var tidyBtnEl = document.getElementById('tidy-btn');
+    if (tidyBtnEl) tidyBtnEl.click();
+    var tidyFeedback = !!tidyBtnEl &&
+      tidyBtnEl.classList.contains('tidying') &&
+      tidyBtnEl.textContent === '整理中…' &&
+      world.tidy === true;
+
     return {
-      ok: hasBar && editOk && addOk && delOk,
+      ok: hasBar && editOk && addOk && delOk && tidyFeedback,
       hasBar: hasBar,
       editOk: editOk,
       addOk: addOk,
-      delOk: delOk
+      delOk: delOk,
+      tidyFeedback: tidyFeedback
     };
   };
 

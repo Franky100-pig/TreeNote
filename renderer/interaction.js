@@ -8,10 +8,10 @@
  *   (derived from a = s*w + pan; verified by the fixed-point check —
  *   the cursor's world coordinate is invariant across the zoom).
  * - Card drag: pointer capture; position written in world coordinates.
- *   Grabbing a card pins it, so the drop lands exactly where you let go —
- *   no release inertia, no spring pulling it home. Obsidian behaves this
- *   way and it is what "free placement" means: the auto-layout may suggest
- *   a spot, but once you touch a card the spot is yours. `P` unpins.
+ *   Grabbing a card holds it exactly where you let go — no release inertia,
+ *   no spring pulling it home. Obsidian behaves this way and it is what
+ *   "free placement" means: the auto-layout may suggest a spot, but once you
+ *   touch a card the spot is yours (only 一键整洁 re-imposes the tree).
  *   Only the grabbed card follows the pointer. Everything else — the
  *   branch included — is left to the physics: springs and repulsion drag
  *   them along, so the rest of the wall floats behind the one in your hand
@@ -69,11 +69,9 @@
         card.vx = 0;
         card.vy = 0;
         // Wake the branch so it starts floating right away instead of
-        // sitting frozen until the force grows past the sleep threshold.
-        //
-        // This is also where the card (and its subtree) leaves the pinned
-        // state: the user has taken it into the physics, so from now on a
-        // drag of its parent can tow it along. See `onGrab` in app.js.
+        // sitting frozen until the force grows past the sleep threshold. From
+        // here the grabbed card (and its subtree) is what the physics moves;
+        // see `onGrab` in app.js.
         onGrab(card);
         // Grab offset: the card keeps the exact point you grabbed it by, so
         // it does not jump its centre to the cursor (Obsidian behaviour).

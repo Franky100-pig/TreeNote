@@ -158,37 +158,27 @@ test('拖子：拖一个子节点时，根只小幅移动（树朝手方向轻�
   assert.ok(Math.abs(g.y - (0 + g._oy - c1._oy)) < 25, `grandchild followed child y: ${g.y.toFixed(0)}`);
 });
 
-test('钉住：钉住的卡片纹丝不动，且作为子树锚点', () => {
+test('森林：多个根各自排成整齐子树、以 rootGap 分隔且互不重叠', () => {
   const w = makeWorld({ drift: false });
-  w.tidy = true; // pull active so the unpinned child anchors on the pinned root
-  addCard(w, { id: 'root', x: 100, y: 100, pinned: true });
-  addCard(w, { id: 'c', x: 30, y: 20, parent: 'root' });
-  const root = physics.findCard(w, 'root');
-  const c = physics.findCard(w, 'c');
-  for (let i = 0; i < 400; i++) step(w);
-  assert.equal(root.x, 100, 'pinned root never moves');
-  assert.equal(root.y, 100);
-  // child hangs off the pinned root's real position (subroot = pinned root).
-  assert.ok(Math.abs(c.y - (100 + w.config.levelGap)) < 40, `child below pinned root: ${c.y.toFixed(0)}`);
-  assert.ok(Math.abs(c.x - 100) < 60, `child centred on pinned root x: ${c.x.toFixed(0)}`);
-});
-
-test('钉住：拖动过的卡片归用户所有（取消钉住后被拉回树的整齐位置）', () => {
-  const w = makeWorld({ drift: false });
-  w.tidy = true; // pull active so the unpinned card snaps to the tidy layout
-  addCard(w, { id: 'root', x: 0, y: 0 });
-  addCard(w, { id: 'k', x: 0, y: 0, parent: 'root' });
-  const k = physics.findCard(w, 'k');
-  k.pinned = true;
-  k.x = 900; k.y = 700; // user dropped it far away
-  for (let i = 0; i < 120; i++) step(w);
-  assert.equal(k.x, 900, 'frozen while pinned');
-  assert.equal(k.y, 700);
-  k.pinned = false;
-  for (let i = 0; i < 900; i++) step(w);
-  // snaps back to its tidy offset relative to the root (~levelGap below root, same x).
-  assert.ok(Math.hypot(k.x - 900, k.y - 700) > 200, `returns to the tidy layout: moved ${Math.hypot(k.x - 900, k.y - 700).toFixed(0)}px`);
-  assert.ok(Math.abs(k.y - w.config.levelGap) < 40, `settled at level 1: ${k.y.toFixed(0)}`);
+  addCard(w, { id: 'r1', x: 0, y: 0 });
+  addCard(w, { id: 'a', x: 0, y: 0, parent: 'r1' });
+  addCard(w, { id: 'b', x: 0, y: 0, parent: 'r1' });
+  addCard(w, { id: 'r2', x: 9999, y: 0 });
+  addCard(w, { id: 'c', x: 0, y: 0, parent: 'r2' });
+  const r1 = physics.findCard(w, 'r1');
+  const r2 = physics.findCard(w, 'r2');
+  r2.x = 10; // scatter the second root right on top of the first to force overlap
+  // press the tidy button (no pin concept anymore: every card obeys the pull)
+  tidy(w);
+  for (let i = 0; i < 1500; i++) step(w);
+  // the two roots should be pushed apart by at least rootGap's worth of space.
+  assert.ok(r2.x > r1.x + 400, `second root separated from the first: dx=${(r2.x - r1.x).toFixed(0)}`);
+  // no two cards overlap anywhere in the forest.
+  let minD = Infinity;
+  for (let i = 0; i < w.cards.length; i++)
+    for (let j = i + 1; j < w.cards.length; j++)
+      minD = Math.min(minD, Math.hypot(w.cards[i].x - w.cards[j].x, w.cards[i].y - w.cards[j].y));
+  assert.ok(minD > 150, `cards never overlap: minD=${minD.toFixed(0)}`);
 });
 
 test('休眠：安定后卡片停止积分，位置逐位冻结', () => {

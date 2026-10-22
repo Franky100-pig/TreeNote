@@ -10,11 +10,8 @@
 <body>
   <div id="app">
     <header id="toolbar">
-      <button id="home-btn" type="button" title="首页：所有卡片墙 (H)" aria-label="返回首页">←</button>
-      <span class="brand">cardwall</span>
-      <button id="board-name" type="button" title="重命名这幅图">未命名</button>
       <button id="tidy-btn" type="button" title="一键整洁：把整面重新排成标准树（T）" aria-label="一键整洁">一键整洁</button>
-      <span class="hint">自由拖拽每个节点 · 一键整洁回到标准树 · P 钉住/释放 · 双击编辑 · 双击空白新建 · 拖到卡片上改挂 · Delete 删除 · 滚轮缩放 · 拖空白平移 · ⌘⇧L 主题 · H 首页</span>
+      <button id="guidance-btn" type="button" title="使用指南" aria-label="使用指南">?</button>
     </header>
     <div id="viewport">
       <div id="world">
@@ -23,6 +20,44 @@
       </div>
     </div>
     <div id="debug-panel"></div>
+
+    <!-- Guidance: collapses the old top-bar clutter into one floating, blurred,
+         MODAL help surface. Opening it blurs + locks the board behind it; only
+         Esc or the close affordance dismiss it (see app.js keydown handler). -->
+    <section id="guidance" hidden>
+      <div class="guidance-backdrop"></div>
+      <div class="guidance-inner" role="dialog" aria-modal="true" aria-label="使用指南">
+        <header class="guidance-head">
+          <h2>使用指南</h2>
+          <button id="guidance-close" type="button" aria-label="关闭">✕</button>
+        </header>
+        <div class="guidance-body">
+          <div class="guidance-section">
+            <h3>当前图</h3>
+            <button id="board-name" type="button" title="重命名这幅图">未命名</button>
+          </div>
+          <div class="guidance-section">
+            <h3>怎么用</h3>
+            <ul class="guide-list">
+              <li><b>一键整洁</b>（顶栏按钮 / <kbd>T</kbd>）：把整面重新排成标准树</li>
+              <li><b>拖动节点</b>：拖到哪停哪，松手不回弹</li>
+              <li><b>＋</b>：在当前卡片下挂一个子节点</li>
+              <li><b>双击卡片</b>：编辑；<b>双击空白</b>：新建（挂到最近的节点）</li>
+              <li><b>把卡片拖到另一张卡片上</b>：改挂父级</li>
+              <li><b>Delete</b>：删除选中节点（子节点自动上挂）</li>
+              <li><b>滚轮</b>：以光标为锚缩放；<b>拖空白</b>：平移</li>
+              <li><b>⌘⇧L</b>：切换深色 / 纸感浅色主题</li>
+              <li><b>H</b>：返回首页 / 打开图库</li>
+            </ul>
+          </div>
+          <div class="guidance-actions">
+            <button id="home-btn" type="button">返回首页</button>
+            <button id="guidance-new" type="button">新建一幅</button>
+            <button id="guidance-theme" type="button">切换主题</button>
+          </div>
+        </div>
+      </div>
+    </section>
 
     <!-- Home: the board library. Every wall is a named file; this is the
          launcher you land on when you press H or the back arrow. -->
@@ -33,7 +68,10 @@
             <h1>卡片墙</h1>
             <p class="home-sub">每幅图是独立的一棵树，命名后随时打开</p>
           </div>
-          <button id="new-board" type="button">＋ 新建一幅</button>
+          <div class="home-head-actions">
+            <button id="home-back" type="button">← 返回当前图</button>
+            <button id="new-board" type="button">＋ 新建一幅</button>
+          </div>
         </header>
         <div id="board-list" role="list"></div>
         <p id="home-empty" class="home-empty" hidden>还没有任何图，先新建一幅</p>

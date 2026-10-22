@@ -291,46 +291,232 @@ body {
   word-break: break-word;
 }
 
-/* ---- toolbar: home + board name ---------------------------------------- */
+/* ---- toolbar actions (only 一键整洁 + Guidance) ------------------------ */
 /* #toolbar is pointer-events:none so the canvas stays draggable under it;
    the controls opt back in. */
-#home-btn,
-#board-name {
+#tidy-btn {
   pointer-events: auto;
   font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent-strong);
+  background: var(--surface);
+  border: 1px solid var(--accent-soft-ring);
+  border-radius: 8px;
+  padding: 6px 14px;
+  cursor: pointer;
+  transition: transform 90ms ease, background 120ms ease, box-shadow 120ms ease, color 120ms ease;
+}
+
+#tidy-btn:hover {
+  background: var(--accent-soft-ring);
+  color: var(--ink);
+}
+
+/* Press feedback: the button dips under the finger, then a short pulse when
+   the tidy fires. This is what makes the press read as "it did something". */
+#tidy-btn:active {
+  transform: scale(0.93);
+}
+
+#tidy-btn.tidying {
+  animation: tidy-pulse 750ms ease;
+}
+
+@keyframes tidy-pulse {
+  0%   { transform: scale(0.93); box-shadow: 0 0 0 0 var(--accent-strong-ring); }
+  40%  { transform: scale(1.03); box-shadow: 0 0 0 7px rgba(201, 169, 80, 0); }
+  100% { transform: scale(1);    box-shadow: 0 0 0 0 rgba(201, 169, 80, 0); }
+}
+
+#guidance-btn {
+  pointer-events: auto;
+  margin-left: auto; /* sit at the far right, away from the tidy action */
+  width: 28px;
+  height: 28px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
   color: var(--muted);
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 7px;
+  border-radius: 50%;
   cursor: pointer;
-}
-
-#home-btn {
-  width: 26px;
-  height: 26px;
-  font-size: 14px;
-  line-height: 1;
-  padding: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  transition: transform 90ms ease, background 120ms ease, color 120ms ease, border-color 120ms ease;
 }
 
-#home-btn:hover,
-#board-name:hover {
+#guidance-btn:hover {
   color: var(--ink);
   border-color: var(--surface-border);
   background: var(--surface);
 }
 
-#board-name {
-  font-size: 13px;
+#guidance-btn:active {
+  transform: scale(0.88);
+}
+
+/* ---- guidance: floating, blurred, modal help panel --------------------- */
+/* z-index 25 = above the home library (20), below the name dialog (30). */
+#guidance {
+  position: absolute;
+  inset: 0;
+  z-index: 25;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+}
+
+#guidance[hidden] { display: none; }
+
+/* The blur + dim that "虚化后面的图" and lock the board behind the panel. */
+.guidance-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.42);
+  -webkit-backdrop-filter: blur(8px) saturate(0.9);
+  backdrop-filter: blur(8px) saturate(0.9);
+}
+
+[data-theme="light"] .guidance-backdrop {
+  background: rgba(247, 245, 240, 0.42);
+}
+
+.guidance-inner {
+  position: relative;
+  width: min(560px, 100%);
+  max-height: calc(100vh - 96px);
+  overflow: auto;
+  padding: 20px 22px 18px;
+  background: var(--surface);
+  border: 1px solid var(--surface-border);
+  border-radius: 14px;
+  box-shadow: 0 24px 70px var(--shadow-lift);
+  animation: guidance-in 160ms ease;
+}
+
+@keyframes guidance-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.985); }
+  to   { opacity: 1; transform: none; }
+}
+
+.guidance-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.guidance-head h2 {
+  font-size: 17px;
   font-weight: 600;
-  padding: 3px 8px;
-  max-width: 320px;
+  letter-spacing: 0.3px;
+}
+
+#guidance-close {
+  width: 26px;
+  height: 26px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: transform 90ms ease, color 120ms ease, background 120ms ease;
+}
+
+#guidance-close:hover {
+  color: var(--ink);
+  background: var(--bg);
+  border-color: var(--surface-border);
+}
+
+#guidance-close:active { transform: scale(0.9); }
+
+.guidance-section { margin-bottom: 16px; }
+
+.guidance-section h3 {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+
+/* Buttons inside the guidance panel share one quiet, tactile style. */
+#guidance #home-btn,
+#guidance #board-name,
+.guidance-actions button {
+  pointer-events: auto;
+  width: auto;
+  height: auto;
+  font: inherit;
+  font-size: 13px;
+  color: var(--ink);
+  background: var(--bg);
+  border: 1px solid var(--surface-border);
+  border-radius: 8px;
+  padding: 7px 13px;
+  cursor: pointer;
+  transition: transform 90ms ease, border-color 120ms ease, background 120ms ease, color 120ms ease;
+}
+
+#guidance #home-btn:hover,
+#guidance #board-name:hover,
+.guidance-actions button:hover {
+  border-color: var(--accent-soft-ring);
+  color: var(--accent-strong);
+}
+
+#guidance #home-btn:active,
+#guidance #board-name:active,
+.guidance-actions button:active {
+  transform: scale(0.95);
+}
+
+#guidance #board-name {
+  font-weight: 600;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.guide-list {
+  list-style: none;
+  display: grid;
+  gap: 7px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.guide-list b {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.guide-list kbd {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  padding: 1px 5px;
+  border: 1px solid var(--surface-border);
+  border-radius: 5px;
+  background: var(--bg);
+  color: var(--ink);
+}
+
+.guidance-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 14px;
+  border-top: 1px solid var(--surface-border);
 }
 
 /* ---- home: the board library ------------------------------------------- */
@@ -356,6 +542,32 @@ body {
   gap: 16px;
   margin-bottom: 22px;
 }
+
+.home-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+
+#home-back {
+  font: inherit;
+  font-size: 13px;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--surface-border);
+  border-radius: 8px;
+  padding: 7px 13px;
+  cursor: pointer;
+  transition: transform 90ms ease, border-color 120ms ease, color 120ms ease, background 120ms ease;
+}
+
+#home-back:hover {
+  color: var(--ink);
+  border-color: var(--accent-soft-ring);
+}
+
+#home-back:active { transform: scale(0.95); }
 
 .home-head h1 {
   font-size: 22px;

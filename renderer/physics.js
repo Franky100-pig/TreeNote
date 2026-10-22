@@ -14,7 +14,7 @@
  *     • world.tidy === false (the DEFAULT): cards are FREE. Each node holds
  *       wherever it is — you can drag any node anywhere and it stays there.
  *       This is the "给足自由度" interaction the user asked for.
- *     • world.tidy === true: every non-pinned card is pulled to its tree
+ *     • world.tidy === true: every card is pulled to its tree
  *       target by a CRITICALLY DAMPED spring (k=40, no overshoot), so the
  *       board eases into a clean diagram. This is engaged ONLY by the
  *       "一键整洁" button (physics.tidy) — or on board load.
@@ -31,9 +31,10 @@
  *       rest of the tree leans only slightly toward your hand (the root
  *       drifts `childLean` of the way, not all the way).
  *
- *   Pinned cards opt out of the layout entirely and keep exactly where the
- *   user put them (Obsidian-style freeze). `P` toggles pin; a newly created
- *   card starts UNPINNED (it joins the float / free placement).
+ *   There is no "pin" anymore: every card belongs to the float and obeys the
+ *   same rules. The tidy pull is the only thing that arranges them, and it is
+ *   opt-in (world.tidy), so a free card simply holds where the user dropped it
+ *   until tidy is engaged.
  *
  * Integration: fixed-step semi-implicit Euler; a card being dragged is
  * positioned externally and its velocity is recorded by the caller. Dormancy
@@ -80,8 +81,8 @@
 
     // ---- soft anti-overlap guard -------------------------------------------
     // The tidy layout already prevents overlap at rest, but a dragged card can
-    // be dropped onto a pinned (free-placed) one. This gentle repulsion keeps
-    // neighbours apart without turning the board back into a floating cloud.
+    // be dropped onto a neighbour. This gentle repulsion keeps neighbours apart
+    // without turning the board back into a floating cloud.
     repulsion: 22000,      // a = repulsion / d (px/s^2)
     repulsionCutoff: 520,  // repulsion cutoff (px)
 
@@ -143,7 +144,6 @@
     card.w = card.w || world.config.cardWidth;
     card.h = card.h || world.config.cardHeight;
     card.dragging = false;
-    card.pinned = !!card.pinned; // free placement: no layout, no drift
     card.awake = card.awake === undefined ? true : !!card.awake;
     card.still = 0;              // consecutive quiet steps (see dormancy)
     card.fx = 0;
@@ -177,8 +177,8 @@
    *
    * The offsets are ADDITIVE (relative to the primary root), which is exactly
    * what the pull step needs: a card's target is `base + (card._ox, card._oy)`
-   * where `base` is the primary root's current position (root drag), the lean
-   * point (child drag), or a pinned ancestor's real position.
+   * where `base` is the primary root's current position (root drag) or the
+   * lean point (child drag).
    */
   function computeTreeLayout(world) {
     var cfg = world.config;
@@ -247,15 +247,15 @@
   }
 
   /**
-   * Walk up to the nearest "anchor root": the nearest pinned ancestor, or the
-   * tree root if none is pinned. A card's target is laid out relative to this
-   * anchor, so a pinned card becomes the local origin for its subtree.
+   * Walk up to the tree root. A card's target is laid out relative to this
+   * anchor (or relative to the dragged card, handled in targetOf).
    */
   function nearestAnchorRoot(world, card) {
+    // (Pin was removed: there is no per-card anchor, so a card's target is laid
+    // out relative to the tree root, or the dragged card, handled in targetOf.)
     var cur = card;
     var guard = 0;
     while (cur && guard++ < 4000) {
-      if (cur.pinned) return cur;
       if (!cur.parent) return cur; // tree root
       var p = findCard(world, cur.parent);
       if (!p) return cur;
@@ -278,7 +278,6 @@
     var subroot = nearestAnchorRoot(world, c);
     var baseX, baseY;
     if (subroot === dragged) { baseX = dragged.x; baseY = dragged.y; }
-    else if (subroot.pinned) { baseX = subroot.x; baseY = subroot.y; }
     else { baseX = anchor.x + (subroot._ox || 0); baseY = anchor.y + (subroot._oy || 0); }
     return {
       x: baseX + (c._ox - (subroot._ox || 0)),
@@ -309,7 +308,7 @@
       world._rootHomeInit = true;
     }
 
-    // Base point for unpinned (non-dragged) roots.
+    // Base point for non-dragged roots.
     var anchor;
     if (dragged && !dragged.parent) {
       anchor = { x: dragged.x, y: dragged.y };                       // drag root -> whole tree follows
@@ -335,7 +334,6 @@
     for (var a = 0; a < n; a++) {
       for (var b = a + 1; b < n; b++) {
         if (!cards[a].dragging && !cards[b].dragging) continue;
-        if (cards[a].pinned && cards[b].pinned) continue;
         var dx = cards[b].x - cards[a].x;
         var dy = cards[b].y - cards[a].y;
         var d2 = dx * dx + dy * dy;
@@ -343,14 +341,14 @@
         var d = Math.sqrt(d2);
         var f = cfg.repulsion / d;
         var ux = dx / d, uy = dy / d;
-        if (!cards[a].pinned) { cards[a].fx -= ux * f; cards[a].fy -= uy * f; }
-        if (!cards[b].pinned) { cards[b].fx += ux * f; cards[b].fy += uy * f; }
+        cards[a].fx -= ux * f; cards[a].fy -= uy * f;
+        cards[b].fx += ux * f; cards[b].fy += uy * f;
       }
     }
 
     // 3. tree-target pull — the "arrange into a tree" force. Critically damped.
     // Engaged in two situations:
-    //   • tidy mode (no drag): every non-pinned card eases into the full tree.
+    //   • tidy mode (no drag): every card eases into the full tree.
     //   • a card is being dragged on a FREE board (tidy === false): only the
     //     grabbed card's subtree is pulled to follow the cursor — the rest of
     //     the board holds exactly where the user left it (full freedom for
@@ -363,7 +361,7 @@
       var cDamp = 2 * Math.sqrt(cfg.k);
       for (var p = 0; p < n; p++) {
         var card = cards[p];
-        if (card.dragging || card.pinned) continue; // controlled externally / frozen
+        if (card.dragging) continue; // positioned externally while grabbed
         // Free board + dragging: move only the grabbed branch; leave the rest.
         if (!world.tidy && dragged && !isDescendant(world, card.id, dragged.id)) continue;
         var t = targetOf(world, card, dragged, anchor);
@@ -386,7 +384,7 @@
       if (dsp2 > 1) {
         for (var o = 0; o < n; o++) {
           var other = cards[o];
-          if (other.dragging || other.pinned) continue;
+          if (other.dragging) continue;
           var ox = other.x - dcard.x, oy = other.y - dcard.y;
           var od = Math.sqrt(ox * ox + oy * oy) || 1e-6;
           if (od > cfg.wakeRadius) continue;
@@ -404,7 +402,7 @@
     //    where the user placed it, so there is no drift and no scatter.
     if (world.drift && world.tidy) {
       for (var g = 0; g < n; g++) {
-        if (cards[g].pinned || cards[g].dragging) continue;
+        if (cards[g].dragging) continue;
         if (world.rng() < cfg.driftChance) {
           cards[g].vx += (world.rng() * 2 - 1) * cfg.driftImpulse;
           cards[g].vy += (world.rng() * 2 - 1) * cfg.driftImpulse;
@@ -416,14 +414,14 @@
     // 6. wake test: a sleeping card stays frozen until something pulls on it.
     for (var w = 0; w < n; w++) {
       var wc = cards[w];
-      if (wc.pinned || wc.dragging || wc.hover) { wc.awake = true; wc.still = 0; continue; }
+      if (wc.dragging || wc.hover) { wc.awake = true; wc.still = 0; continue; }
       if (!wc.awake && (wc.fx * wc.fx + wc.fy * wc.fy) > cfg.sleepForce * cfg.sleepForce) {
         wc.awake = true;
         wc.still = 0;
       }
     }
 
-    // 7. integrate (dragged, pinned, hovered and sleeping cards are positioned
+    // 7. integrate (dragged, hovered and sleeping cards are positioned
     //    externally or intentionally still). A card that the spring is pulling
     //    (section 3) is already damped by the `- cDamp*v` term in that force,
     //    so we leave it be. Every OTHER free-moving card gets a global viscous
@@ -432,7 +430,7 @@
     var decay = Math.exp(-cfg.globalDamp * dt);
     for (var k = 0; k < n; k++) {
       var q = cards[k];
-      if (q.dragging || q.pinned || q.hover || !q.awake) { q.vx = 0; q.vy = 0; continue; }
+      if (q.dragging || q.hover || !q.awake) { q.vx = 0; q.vy = 0; continue; }
       q.vx += q.fx * dt;
       q.vy += q.fy * dt;
       if (!q._inPull) { q.vx *= decay; q.vy *= decay; }
@@ -448,7 +446,7 @@
     // 8. dormancy: quiet for sleepSteps in a row and the card stops integrating.
     for (var s = 0; s < n; s++) {
       var sc = cards[s];
-      if (sc.pinned || sc.dragging || sc.hover || !sc.awake) continue;
+      if (sc.dragging || sc.hover || !sc.awake) continue;
       var v2 = sc.vx * sc.vx + sc.vy * sc.vy;
       var f2 = sc.fx * sc.fx + sc.fy * sc.fy;
       if (v2 < cfg.sleepSpeed * cfg.sleepSpeed && f2 < cfg.sleepForce * cfg.sleepForce) {
@@ -507,7 +505,6 @@
     var cards = world.cards;
     for (var i = 0; i < cards.length; i++) {
       var c = cards[i];
-      if (c.pinned) continue;
       e += 0.5 * (c.vx * c.vx + c.vy * c.vy);
       var t = targetOf(world, c, dragged, anchor);
       var dx = c.x - t.x, dy = c.y - t.y;
@@ -515,7 +512,6 @@
     }
     for (var a2 = 0; a2 < cards.length; a2++) {
       for (var b2 = a2 + 1; b2 < cards.length; b2++) {
-        if (cards[a2].pinned || cards[b2].pinned) continue;
         var ddx = cards[b2].x - cards[a2].x, ddy = cards[b2].y - cards[a2].y;
         var dd = Math.sqrt(ddx * ddx + ddy * ddy);
         if (dd > 1e-6) e -= cfg.repulsion * Math.log(Math.min(dd, cfg.repulsionCutoff));

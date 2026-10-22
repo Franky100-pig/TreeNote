@@ -118,10 +118,9 @@ function sanitizeBoard(data) {
       note: String(c.note == null ? '' : c.note).slice(0, MAX_NOTE),
       x: Number.isFinite(c.x) ? c.x : 0,
       y: Number.isFinite(c.y) ? c.y : 0,
-      parent: null,
-      // Free placement survives a reload: a card the user has positioned
-      // must not start drifting again the next time the board opens.
-      pinned: c.pinned === true
+      parent: null
+      // Free placement survives a reload: a card the user has positioned stays
+      // put until they press 一键整洁 (the tidy pull is opt-in).
     });
   }
   // Second pass: parents may be declared after their children.
@@ -347,6 +346,21 @@ function createWindow() {
         const okToolbar = !!toolbar && toolbar.ok;
         console.log('[smoke] toolbar-check:', JSON.stringify(toolbar), okToolbar ? 'PASS' : 'FAIL');
         if (!okToolbar) { app.exit(1); return; }
+        // Guidance: the top-bar clutter is now one floating, blurred, modal
+        // help panel. Verify it opens / blurs / closes, and grab a screenshot.
+        const guidance = await win.webContents.executeJavaScript('window.__cardwallGuidanceCheck()');
+        const okGuidance = !!guidance && guidance.ok;
+        console.log('[smoke] guidance-check:', JSON.stringify(guidance), okGuidance ? 'PASS' : 'FAIL');
+        if (!okGuidance) { app.exit(1); return; }
+        await win.webContents.executeJavaScript('document.getElementById("guidance-btn").click()');
+        await new Promise((r) => setTimeout(r, 260)); // let the panel fade-in settle
+        const shotGuide = await capturePainted(win, 0.01);
+        if (shotGuide) {
+          const guideShotPath = path.join(path.dirname(SMOKE_SHOT), 'smoke-guidance.png');
+          fs.writeFileSync(guideShotPath, shotGuide.img.toPNG());
+          console.log('[smoke] guidance screenshot ->', guideShotPath, 'ink', shotGuide.ink.toFixed(3));
+        }
+        await win.webContents.executeJavaScript('document.getElementById("guidance-close").click()');
         // Vault round trip: save over IPC, then verify the file on disk.
         const save = await win.webContents.executeJavaScript('window.__cardwallSaveNow()');
         const onDisk = save && save.path && fs.existsSync(save.path)

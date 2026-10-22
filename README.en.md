@@ -14,7 +14,7 @@ Name as many boards as you like and open any of them from the home screen.
 
 ## Home: named boards
 
-Press `H` or the `←` in the top-left to go home. Name a board as you create it, switch whenever you want; deleted boards go to the system trash, so a misclick is undoable.
+Press `H`, or open the top-right `?` **Guidance** panel and hit **Home**. Name a board as you create it, switch whenever you want; deleted boards go to the system trash, so a misclick is undoable.
 
 ![home](docs/home.png)
 
@@ -26,19 +26,23 @@ Press `H` or the `←` in the top-left to go home. Name a board as you create it
 
 | Action | Gesture |
 |---|---|
-| Home / open another board | `H` or the `←` in the top-left; click any card to open |
-| Rename the current board | Click the board name in the toolbar (or "rename" on a home card) |
+| **Guidance** | Click the `?` at the top-right: a floating **Guidance** panel dims and **blurs + locks** the board behind it, listing every gesture and offering **Home / New board / Toggle theme**. `Esc` or ✕ closes it |
+| Home / open another board | `H`, or hit **Home** inside Guidance; click any card to open |
+| Rename the current board | Click the board name in Guidance's "Current board" section (or "rename" on a home card) |
 | Edit a card | Hover it → click ✎ on the action bar, **or just double-click** (Escape cancels, Enter commits) |
 | **New child node** | Hover it → click ＋: a child card fans out **below-right** of this card (never on top of the parent) and opens straight into edit mode |
 | Delete a card | Hover it → click ✕ (or select and press Delete / Backspace) |
 | New card | Double-click empty canvas (attaches to the nearest card within 320px, otherwise it becomes a root) |
 | Re-parent | Drop a card onto another one (dropping onto your own descendant is blocked, to avoid cycles) |
-| **One-click tidy** | Click the "一键整洁" button or press `T`: re-flow the **whole wall into the standard tree** |
+| **One-click tidy** | Click the "一键整洁" button or press `T`: re-flow the **whole wall into the standard tree**. The button dips on press and shows "整理中…" while it works |
 | **Free drag** | Drag any node where you like — it **stays where you drop it** (no snap-back) and the wall becomes free-placed; while dragging, the node and its subtree follow the cursor, everything else holds |
-| Pin / unpin | Select a card and press `P`: pinned = stays put even under one-click tidy (excluded from the tree); unpinned = rejoins the tidy tree. New / dragged cards are unpinned by default, so they belong to the tree |
 | Pan / zoom | Drag empty canvas / scroll wheel (anchored at the cursor, 0.2–2.5) |
 | Debug overlay | `F3` or `Cmd+Shift+D`: fps, card count, sim time, scale, peak speed, mechanical energy, tree target, velocity vectors |
 | Toggle theme | `Cmd/Ctrl+Shift+L`: black canvas ⇄ paper-light; the choice is remembered |
+
+The **Guidance** panel floats above the canvas while blurring and locking the board behind it:
+
+![guidance](docs/guidance.png)
 
 Hovering a card floats an action bar out of its top-right corner (✎ / ＋ / ✕) and temporarily **freezes** that card (it stops being integrated) so the bar can't slide away while you float around and your click can't miss. Editing pauses the physics world; committing resumes it.
 
@@ -52,7 +56,7 @@ Every card has a **deterministic tree target** (tidy-tree / Reingold–Tilford s
 
 But the spring is **off by default**: since v0.6 the wall starts in **free placement** — every card sits where you left it and nothing tugs on its neighbour, and a drop never snaps back. The spring only engages when you press **one-click tidy** (or when you first open a board), easing the whole wall into the standard tree.
 
-When engaged, every unpinned card is pulled to its target by a **critically damped spring** (`k = 40`, critical damping `2√k ≈ 12.6`) — it eases onto the target in ~0.6 s with no overshoot, and **never translates a whole branch rigidly**: each card arrives on its own depending on its distance, and the whole tree just resolves into one clean diagram.
+When engaged, every card is pulled to its target by a **critically damped spring** (`k = 40`, critical damping `2√k ≈ 12.6`) — it eases onto the target in ~0.6 s with no overshoot, and **never translates a whole branch rigidly**: each card arrives on its own depending on its distance, and the whole tree just resolves into one clean diagram.
 
 The layout is **deterministic**: the same structure always packs into the same diagram — no randomness. At rest in tidy mode the wall is one tidy tree; at rest in free mode each card is frozen in place, untugged.
 
@@ -62,7 +66,7 @@ The layout is **deterministic**: the same structure always packs into the same d
 - **Drag carries the subtree**: in either mode, the card you grab brings its **whole subtree** along, following the cursor; everything else stays put and is not tugged.
 - **Dragging a root while tidy**: if the board is currently tidy (just opened or just tidied), dragging the root re-anchors the whole tree on the root in your hand; dragging a child makes its subtree follow while the rest only **leans `childLean = 0.12`** toward the hand (the root moves only ~12%). The moment you let go, the wall switches back to free mode.
 
-**Where does it stop?** The card you dragged **stays where you let go**, and so does everything else — the wall is now free-placed and no longer auto-arranges. To re-flow the whole wall into the standard tree, press **one-click tidy** (button or `T`). To make a single card immovable even under tidy, pin it with `P`.
+**Where does it stop?** The card you dragged **stays where you let go**, and so does everything else — the wall is now free-placed and no longer auto-arranges. To re-flow the whole wall into the standard tree, press **one-click tidy** (button or `T`).
 
 ### Key parameters (`CONFIG` in `renderer/physics.js`)
 
@@ -78,19 +82,15 @@ The layout is **deterministic**: the same structure always packs into the same d
 
 In tidy mode a card sits exactly on its tree target (the spring is zero and no other force acts), so the wall is a **fixed picture**, not a pile of cards that jitters forever; and because repulsion only acts during a drag, a quiet card's net force falls below the sleep threshold and it truly goes to sleep. In free mode the same holds — cards simply hold where you left them, untugged.
 
-### Pinning excludes from the tree, it doesn't freeze everything
+### The top bar keeps just two buttons
 
-`pinned` means "you placed this card by hand, so don't move it even under one-click tidy" — it is **excluded from the tidy tree** and frozen completely. Its descendants hang off its real position.
+Since v0.7 the top bar does less on purpose: only **one-click tidy** and a `?` (**Guidance**) at the far right. Home, the board name, the hint text and the theme toggle all moved into the **Guidance** panel — pressing `?` floats it above the canvas, **blurs and locks the board behind it**, and only `Esc` / ✕ / an in-panel action dismisses it. The canvas stays clean and the main action stays one click away.
 
-- A **newly created card** is **unpinned by default**: it belongs to the tree and joins the re-flow when you press tidy
-- The moment you **drag a card**, it **and its whole subtree** are unpinned, permanently — you have handed it back to the tree layout
-- **`P`** is the manual override, in either direction, and flips the subtree together (a card that rejoins the tree while its children stay pinned is still a card its parent can't drag around)
-
-That is the answer to "can one node carry the others": yes, as long as that card isn't pinned.
+**Every node belongs to the tree**: there is no "pin" exception anymore, so one-click tidy re-flows every card; in free mode each card simply holds where you left it.
 
 ### Layouts settle down
 
-Auto-layout is deterministic, not a random initial guess. Unpinned cards **fall asleep** after 60 quiet steps: integration stops and the position freezes bit for bit, until some force genuinely exceeds the threshold and wakes it. So a settled layout is a fixed wall, not a pile of cards that jitters forever. Drift is only an occasional wake-up that lets one card float once — a ripple, not a continuous tremble.
+Auto-layout is deterministic, not a random initial guess. Quiet cards **fall asleep** after 60 quiet steps: integration stops and the position freezes bit for bit, until some force genuinely exceeds the threshold and wakes it. So a settled layout is a fixed wall, not a pile of cards that jitters forever. Drift is only an occasional wake-up that lets one card float once — a ripple, not a continuous tremble.
 
 ## Where your data lives
 
@@ -109,7 +109,7 @@ Auto-layout is deterministic, not a random initial guess. Unpinned cards **fall 
 npm install
 npm start          # normal launch
 npm test           # physics unit tests (14)
-npm run smoke      # ten-layer self-check: render / camera / debug / theme / interaction / editor / toolbar / persist / home / load
+npm run smoke      # eleven-layer self-check: render / camera / debug / theme / interaction / editor / toolbar / guidance / persist / home / load
 npm run dist       # package the macOS dmg → dist/cardwall-<version>-arm64.dmg
 ```
 
@@ -126,7 +126,7 @@ npm run dist
 ### Layout of the code
 
 ```
-main.js                 Electron main process: window, library IPC, atomic vault writes, ten-layer smoke assertions
+main.js                 Electron main process: window, library IPC, atomic vault writes, eleven-layer smoke assertions
 preload.js              contextBridge: listBoards / createBoard / openBoard / saveBoard / renameBoard / deleteBoard
 index.html styles.css    Shell, theme tokens, card / edge / debug-panel styles
 renderer/theme-boot.js  Applies the saved theme on the first frame (no light-mode flash)
