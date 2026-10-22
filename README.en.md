@@ -4,9 +4,9 @@
 
 <img src="docs/icon.png" width="92" align="right" alt="cardwall icon">
 
-> The next version of taking digital notes — but your notes should be able to float.
+> TreeNote — the next shape of outline notes: your points arrange themselves into a hierarchy.
 
-A force-directed **floating card wall** for notes. Break a thought into cards, drag them wherever you like, and leave them there. Every card you haven't touched is tied to a **fixed-length rope**, so it drifts when you pull on a neighbour and settles the moment you let go.
+A force-directed **tidy-tree card wall** for notes. Break a thought into cards; the parent/child relationships lay themselves out as a clean, layered tree diagram — same-depth nodes share a level, parents centred over their children. Drag once and the whole hierarchy reads at a glance; let go and it settles into one tidy picture.
 
 Name as many boards as you like and open any of them from the home screen.
 
@@ -33,64 +33,60 @@ Press `H` or the `←` in the top-left to go home. Name a board as you create it
 | Delete a card | Hover it → click ✕ (or select and press Delete / Backspace) |
 | New card | Double-click empty canvas (attaches to the nearest card within 320px, otherwise it becomes a root) |
 | Re-parent | Drop a card onto another one (dropping onto your own descendant is blocked, to avoid cycles) |
-| Free dragging | Drag a card anywhere. The card in your hand follows the pointer, **it and its whole subtree are tugged along by the ropes**, and neighbours drift away in the wake by distance. On release it goes back to the force field, and the rope pulls it to its own length |
-| Pin / unpin | Select a card and press `P`: pinned means completely still (subtree included), unpinned hands it back to the force field (works even with the pointer still on the card) |
+| **Drag the root** | Drag the **root card** anywhere: the whole tree re-anchors on the root in your hand and **re-packs into a tidy tree**, children reflow, the hierarchy reads at a glance |
+| **Drag a child** | Drag a **child card**: it **and its whole subtree** follow the pointer, while the rest of the tree only **leans slightly** toward your hand (the root moves only ~12%), never a rigid translation |
+| Pin / unpin | Select a card and press `P`: pinned = completely frozen and out of auto-layout (free-place it like Obsidian); unpinned = back in the tidy-tree auto-layout. Works even with the pointer still on the card. New / dragged cards are unpinned by default, so they belong to the tree |
 | Pan / zoom | Drag empty canvas / scroll wheel (anchored at the cursor, 0.2–2.5) |
-| Debug overlay | `F3` or `Cmd+Shift+D`: fps, card count, sim time, scale, peak speed, mechanical energy, anchors, velocity vectors |
+| Debug overlay | `F3` or `Cmd+Shift+D`: fps, card count, sim time, scale, peak speed, mechanical energy, tree target, velocity vectors |
 | Toggle theme | `Cmd/Ctrl+Shift+L`: black canvas ⇄ paper-light; the choice is remembered |
 
 Hovering a card floats an action bar out of its top-right corner (✎ / ＋ / ✕) and temporarily **freezes** that card (it stops being integrated) so the bar can't slide away while you float around and your click can't miss. Editing pauses the physics world; committing resumes it.
 
-## Physics: ropes, not springs
+## Physics: tidy tree, not rope
 
-Every card is tied by a **fixed-length rope** — root cards to the world origin, child cards to their parent. The rope constrains distance only, never angle, which means:
+Every card has a **deterministic tree target** (tidy-tree / Reingold–Tilford style, leaf-packing):
 
-- Children can **swing** around their parent, and a dragged parent **tugs** them along instead of translating the whole branch rigidly
-- The rope **pulls but never pushes** (it goes slack when you move closer), so there's none of the springy bounce
-- Resistance splits in two: critical damping along the rope (no rebound) plus a little tangential damping, like a wet rope
+- **Same level, same row**: nodes at the same depth share a horizontal line (parent above, child below, `levelGap` apart)
+- **Parent centred over children**: a parent sits at the midpoint of its outermost children
+- **No subtree overlap**: leaves are packed left-to-right along a shared cursor at `nodeGap` spacing
 
-One piece of physics can't be argued with: **a free angle means no restoring force** (tangential stiffness is only `F/r`, about 0.6 at 400px), so a whole wall slowly rotates around its anchors. Hence a very weak layer of **angle memory** (`anchorStiffness` 30, half as stiff as the rope itself): while you drag you still see the swing, and on release it slowly pulls the direction back toward where it came from.
+Then every unpinned card is pulled to its target by a **critically damped spring** (`k = 40`, critical damping `2√k ≈ 12.6`) — it eases onto the target in ~0.6 s with no overshoot, and **never translates a whole branch rigidly**: each card arrives on its own depending on its distance, and the whole tree just resolves into one clean diagram.
 
-Measured on a 6-card tree dragged 400px: **visually still after 1.9–3.3 s, fully asleep after 3.3–5.1 s**, then zero creep (< 0.1px / 5s). Set `anchorStiffness` to 0 for a pure free-swinging rope — prettier, but the wall takes half a minute to stop.
+The layout is **deterministic**: the same structure always packs into the same diagram — no randomness. At rest the wall is one tidy tree.
+
+### Three drag feels
+
+- **Drag the root**: the whole tree re-anchors on the root in your hand and re-packs; children reflow into the tree
+- **Drag a child**: its whole subtree follows the cursor as a tidy unit; the rest of the tree leans only `childLean = 0.12` toward the hand — the root moves only about 12% of the way ("when you move a child, the root barely moves")
+- **Descendants of the dragged card**: automatically re-anchor on the cursor, so grabbing a middle node brings its entire subtree along
 
 ### Key parameters (`CONFIG` in `renderer/physics.js`)
 
 | Parameter | Value | Meaning |
 |---|---|---|
-| `dt` / `damping` / `maxSpeed` | 1/60 s / 0.93 / 3000 | Fixed step, per-step damping (bleeds the swing away), speed clamp |
-| `repulsion` / `repulsionCutoff` | 90000 / 800px | `a = repulsion / d`, centre-distance repulsion (water-like, not springy) |
-| `childRopeLength` | 200px | Rope length: roots to the world origin, children to their parent. Distance locked, angle free |
-| `ropeStiffness` | 60 | Rope tension stiffness. Children are pulled but never pushed; roots are moored both ways, otherwise the whole wall drifts off |
-| `ropeDampRatio` | 1.0 | **Radial** damping ratio (critical): the velocity component along the rope is eaten, so nothing bounces back |
-| `swingDamp` | 0.4 | **Tangential** damping: 0 = longest swing, 1 = swing and settle are equally damped |
-| `anchorStiffness` | 30 | Angle memory: tugs the card a little toward its nominal direction. 0 = pure free swing |
-| `wakeRadius` / `wakeStrength` | 520px / 1.5 | Drag wake: the card in your hand pushes neighbours away by distance. Push-only, so it can't self-excite |
-| `ringBaseRadius` / `ringSpacing` | 220 / 60 | Root ring radius (also the root rope length), increment per extra card on a level |
-| `driftImpulse` / `driftChance` | 14 px/s / 0.0009 | Occasional drift (seeded, reproducible; roughly every 18 s, and it doubles as a wake-up) |
+| `dt` / `k` / `maxSpeed` | 1/60 s / 40 / 3000 | Fixed step, spring stiffness toward the tree target, speed clamp |
+| `nodeGap` / `levelGap` / `rootGap` | 300 / 220 / 360 px | Leaf spacing / vertical level spacing / gap between separate root trees |
+| `childLean` | 0.12 | Fraction the rest of the tree leans toward the hand when a child is dragged (root moves ~12%) |
+| `repulsion` / `repulsionCutoff` | 22000 / 520 px | Soft anti-overlap guard, applied **only while dragging** (`a = repulsion / d`) |
+| `wakeRadius` / `wakeStrength` | 520 / 0.4 | Drag wake: the moving card pushes neighbours aside by distance |
+| `driftImpulse` / `driftChance` | 3 px/s / 0.0002 | A very faint, reproducible Brownian "breath" at rest (occasionally wakes a card for one ripple) |
 | `sleepSpeed` / `sleepForce` / `sleepSteps` | 0.6 px/s / 30 px/s² / 60 steps | Sleep criteria: slow enough, weak enough net force, for long enough → stop integrating |
 
-The resting distance isn't the rope length: repulsion pushes the equilibrium outward, and a lone child's analytic balance is `K·(d−L) = repulsion/d` (K = `ropeStiffness + anchorStiffness`) — the unit tests use that closed form as a regression. A card with `childRopeLength` 200px actually stops around 197px, which is repulsion pushing the equilibrium out. Not a bug.
+At rest a card sits exactly on its tree target (the spring is zero and no other force acts), so the wall is a **fixed picture**, not a pile of cards that jitters forever; and because repulsion only acts during a drag, a quiet card's net force falls below the sleep threshold and it truly goes to sleep.
 
 ### Pinning is protection, not a shackle
 
-`pinned` means "you have not touched this card yet, so leave it where it is". It
-opts the card out of **every** force — including the rope — so a pinned card
-neither drifts nor gets towed when its parent is dragged.
+`pinned` means "you placed this card by hand, so leave it where it belongs" — it **opts out of auto-layout**, freezes completely, and free-places like Obsidian. Its descendants hang off its real position.
 
 - A **newly created card** is pinned: you just put it there, so it should stay
-- The moment you **drag a card**, it **and its whole subtree** are unpinned,
-  permanently. You have taken it into the physics, so it belongs to the float
-  now, and dragging its parent can tow it along
-- **`P`** is the manual override, in either direction. Unpinning releases the
-  subtree too: a card that rejoins the float while its children stay pinned is
-  still a card that cannot be dragged around by its parent
+- The moment you **drag a card**, it **and its whole subtree** are unpinned, permanently. You have taken it into the tree layout, so dragging its parent can now tow it along
+- **`P`** is the manual override, in either direction, and flips the subtree together (a card that rejoins the layout while its children stay pinned is still a card its parent can't drag around)
 
-That is the answer to "can one node carry the others": yes, as long as that
-card is not pinned.
+That is the answer to "can one node carry the others": yes, as long as that card isn't pinned.
 
 ### Layouts settle down
 
-Auto-layout is only a **first guess**. Unpinned cards **fall asleep** after 60 quiet steps: integration stops and the position freezes bit for bit, until some force genuinely exceeds the threshold and wakes it. So a settled layout is a fixed wall, not a pile of cards that jitters forever. Drift drops to roughly once every 18 s per card — just enough to wake one card and let it float once. A ripple, not a continuous tremble.
+Auto-layout is deterministic, not a random initial guess. Unpinned cards **fall asleep** after 60 quiet steps: integration stops and the position freezes bit for bit, until some force genuinely exceeds the threshold and wakes it. So a settled layout is a fixed wall, not a pile of cards that jitters forever. Drift is only an occasional wake-up that lets one card float once — a ripple, not a continuous tremble.
 
 ## Where your data lives
 
@@ -108,8 +104,8 @@ Auto-layout is only a **first guess**. Unpinned cards **fall asleep** after 60 q
 ```bash
 npm install
 npm start          # normal launch
-npm test           # physics unit tests (15)
-npm run smoke      # nine-layer self-check: render / camera / debug / theme / interaction / editor / toolbar / persist / home / load
+npm test           # physics unit tests (12)
+npm run smoke      # ten-layer self-check: render / camera / debug / theme / interaction / editor / toolbar / persist / home / load
 npm run dist       # package the macOS dmg → dist/cardwall-<version>-arm64.dmg
 ```
 
@@ -126,17 +122,17 @@ npm run dist
 ### Layout of the code
 
 ```
-main.js                 Electron main process: window, library IPC, atomic vault writes, nine-layer smoke assertions
+main.js                 Electron main process: window, library IPC, atomic vault writes, ten-layer smoke assertions
 preload.js              contextBridge: listBoards / createBoard / openBoard / saveBoard / renameBoard / deleteBoard
 index.html styles.css    Shell, theme tokens, card / edge / debug-panel styles
 renderer/theme-boot.js  Applies the saved theme on the first frame (no light-mode flash)
-renderer/physics.js     Force-directed integrator (UMD, shared by Node tests and the browser)
+renderer/physics.js     Tidy-tree layout + critically damped spring integrator (UMD, shared by Node tests and the browser)
 renderer/app.js         World container, edge geometry, fixed-step loop, camera, editing, persistence wiring
 renderer/interaction.js Pan / cursor-anchored zoom / dragging / re-parenting
 renderer/debug.js       F3 overlay
 renderer/sample.js      The sample tree shown on first launch
 build/icon.svg          Icon source; build/icon.icns is rasterised from it
-test/physics.test.mjs   15 unit tests
+test/physics.test.mjs   12 unit tests
 ```
 
 Every colour comes from the semantic tokens at the top of `styles.css` (`--bg` / `--surface` / `--ink` / `--edge` …), so one token block *is* a theme: `:root` is the default dark (pure black canvas) and `[data-theme="light"]` overrides the same tokens for the paper-light look. To add a third theme, copy a token block and teach `applyTheme` one more name — no component styles need to change.
