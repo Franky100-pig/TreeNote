@@ -33,8 +33,8 @@ Press `H` or the `←` in the top-left to go home. Name a board as you create it
 | Delete a card | Hover it → click ✕ (or select and press Delete / Backspace) |
 | New card | Double-click empty canvas (attaches to the nearest card within 320px, otherwise it becomes a root) |
 | Re-parent | Drop a card onto another one (dropping onto your own descendant is blocked, to avoid cycles) |
-| Free dragging | Drag a card anywhere; **it stays where you let go**. The card in your hand follows the pointer, the rest are tugged along by their ropes, and neighbours drift away in the wake by distance |
-| Re-float | Select a card and press `P`: hand it back to the force field and the rope pulls it back to its own length (works even with the pointer still on the card) |
+| Free dragging | Drag a card anywhere. The card in your hand follows the pointer, **it and its whole subtree are tugged along by the ropes**, and neighbours drift away in the wake by distance. On release it goes back to the force field, and the rope pulls it to its own length |
+| Pin / unpin | Select a card and press `P`: pinned means completely still (subtree included), unpinned hands it back to the force field (works even with the pointer still on the card) |
 | Pan / zoom | Drag empty canvas / scroll wheel (anchored at the cursor, 0.2–2.5) |
 | Debug overlay | `F3` or `Cmd+Shift+D`: fps, card count, sim time, scale, peak speed, mechanical energy, anchors, velocity vectors |
 | Toggle theme | `Cmd/Ctrl+Shift+L`: black canvas ⇄ paper-light; the choice is remembered |
@@ -71,11 +71,26 @@ Measured on a 6-card tree dragged 400px: **visually still after 1.9–3.3 s, ful
 
 The resting distance isn't the rope length: repulsion pushes the equilibrium outward, and a lone child's analytic balance is `K·(d−L) = repulsion/d` (K = `ropeStiffness + anchorStiffness`) — the unit tests use that closed form as a regression. A card with `childRopeLength` 200px actually stops around 197px, which is repulsion pushing the equilibrium out. Not a bug.
 
+### Pinning is protection, not a shackle
+
+`pinned` means "you have not touched this card yet, so leave it where it is". It
+opts the card out of **every** force — including the rope — so a pinned card
+neither drifts nor gets towed when its parent is dragged.
+
+- A **newly created card** is pinned: you just put it there, so it should stay
+- The moment you **drag a card**, it **and its whole subtree** are unpinned,
+  permanently. You have taken it into the physics, so it belongs to the float
+  now, and dragging its parent can tow it along
+- **`P`** is the manual override, in either direction. Unpinning releases the
+  subtree too: a card that rejoins the float while its children stay pinned is
+  still a card that cannot be dragged around by its parent
+
+That is the answer to "can one node carry the others": yes, as long as that
+card is not pinned.
+
 ### Layouts settle down
 
-Auto-layout is only a **first guess**. The moment you touch a card — drag it, or create it on empty canvas — it becomes **pinned**: no rope, no drift, no integration. It stays exactly where you put it, across restarts. Press `P` to hand it back to the force field.
-
-Unpinned cards **fall asleep** after 60 quiet steps: integration stops and the position freezes bit for bit, until some force genuinely exceeds the threshold and wakes it. So a settled layout is a fixed wall, not a pile of cards that jitters forever. Drift drops to roughly once every 18 s per card — just enough to wake one card and let it float once. A ripple, not a continuous tremble.
+Auto-layout is only a **first guess**. Unpinned cards **fall asleep** after 60 quiet steps: integration stops and the position freezes bit for bit, until some force genuinely exceeds the threshold and wakes it. So a settled layout is a fixed wall, not a pile of cards that jitters forever. Drift drops to roughly once every 18 s per card — just enough to wake one card and let it float once. A ripple, not a continuous tremble.
 
 ## Where your data lives
 

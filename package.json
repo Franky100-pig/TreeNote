@@ -1,6 +1,6 @@
 {
   "name": "cardwall",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "力导向漂浮卡片墙笔记工具 — 多点级卡片树、多幅命名画板、绳子物理 + 可摆动",
   "main": "main.js",
   "scripts": {
