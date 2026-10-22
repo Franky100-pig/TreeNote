@@ -48,16 +48,15 @@
       while (g.firstChild) g.removeChild(g.firstChild);
       var biggest = 0;
       world.cards.forEach(function (c) {
-        // anchor marker (where the snap spring wants the card)
-        var a = world.anchors.get(c.id);
-        if (a) {
+        // tree-target marker (where the tidy layout wants the card)
+        if (Number.isFinite(c.tx) && Number.isFinite(c.ty)) {
           mark('circle', {
-            cx: a.x.toFixed(1), cy: a.y.toFixed(1), r: 4,
+            cx: c.tx.toFixed(1), cy: c.ty.toFixed(1), r: 4,
             class: 'dbg-anchor'
           });
           mark('line', {
             x1: c.x.toFixed(1), y1: c.y.toFixed(1),
-            x2: a.x.toFixed(1), y2: a.y.toFixed(1),
+            x2: c.tx.toFixed(1), y2: c.ty.toFixed(1),
             class: 'dbg-anchor-line'
           });
         }

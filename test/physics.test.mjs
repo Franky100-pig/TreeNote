@@ -2,11 +2,16 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import physics from '../renderer/physics.js';
 
-const { createWorld, addCard, step, totalEnergy, computeAnchors } = physics;
+const { createWorld, addCard, step, totalEnergy, computeTreeLayout } = physics;
 
 function makeWorld(opts) {
-  const w = createWorld({ seed: 42, ...opts });
-  return w;
+  return createWorld({ seed: 42, ...opts });
+}
+
+function depthOf(world, id) {
+  let d = 0, cur = physics.findCard(world, id), guard = 0;
+  while (cur && cur.parent && guard++ < 1000) { d++; cur = physics.findCard(world, cur.parent); }
+  return d;
 }
 
 test('确定性：同 seed 同输入 → 位置逐位一致', () => {
@@ -47,143 +52,138 @@ test('能耗散：关漂移后总机械能递减且不发散', () => {
   assert.ok(maxE <= e0 + Math.abs(e0) * 0.05 + 1e-6, `no energy blowup: maxE=${maxE.toFixed(0)} e0=${e0.toFixed(0)}`);
 });
 
-test('排斥：重叠卡片被推开', () => {
+test('tidy 布局：同深度共享层级，父节点居中于子节点，叶子不重叠', () => {
   const w = makeWorld({ drift: false });
-  addCard(w, { id: 'a', x: 0, y: 0 });
-  addCard(w, { id: 'b', x: 5, y: 5 });
-  const d0 = Math.hypot(w.cards[1].x - w.cards[0].x, w.cards[1].y - w.cards[0].y);
-  for (let i = 0; i < 300; i++) step(w);
-  const d1 = Math.hypot(w.cards[1].x - w.cards[0].x, w.cards[1].y - w.cards[0].y);
-  assert.ok(d1 > d0 + 50, `distance should grow: d0=${d0.toFixed(1)} d1=${d1.toFixed(1)}`);
-});
-
-test('绳子：单根卡被拉远后收敛到绳长，角度不被约束', () => {
-  const w = makeWorld({ drift: false });
-  addCard(w, { id: 'solo', x: 800, y: 600 });
-  computeAnchors(w);
-  const ropeLen = w.anchors.get('solo').ringR;
-  const r0 = Math.hypot(w.cards[0].x, w.cards[0].y);
-  for (let i = 0; i < 900; i++) step(w);
-  const solo = w.cards[0];
-  const r = Math.hypot(solo.x, solo.y);
-  assert.ok(r0 > ropeLen, 'setup: card starts outside its rope');
-  assert.ok(Math.abs(r - ropeLen) < 1, `settles exactly on the rope (${ropeLen}), got ${r.toFixed(2)}`);
-  // 绳子只约束距离：方向沿初始的 (0.8, 0.6) 保持住，没有任何力把它拽回某个角度槽
-  assert.ok(solo.x > 0 && solo.y > 0, 'kept its own direction (no angular snap-back)');
-  assert.ok(Math.hypot(solo.vx, solo.vy) < 1, 'at rest');
-});
-
-test('绳子：子卡被拉远后停在父卡外 K·(d−L)=repulsion/d 处', () => {
-  const w = makeWorld({ drift: false });
-  addCard(w, { id: 'p', x: 0, y: 0 });
-  addCard(w, { id: 'k', x: 800, y: 600, parent: 'p' });
+  // root -> c1,c2,c3 (leaves) and c4 -> g (grandchild)
+  addCard(w, { id: 'root', x: 0, y: 0 });
+  addCard(w, { id: 'c1', x: -400, y: -200, parent: 'root' });
+  addCard(w, { id: 'c2', x: 0, y: -200, parent: 'root' });
+  addCard(w, { id: 'c3', x: 400, y: -200, parent: 'root' });
+  addCard(w, { id: 'c4', x: 200, y: 200, parent: 'root' });
+  addCard(w, { id: 'g', x: 200, y: 400, parent: 'c4' });
+  computeTreeLayout(w);
   const cfg = w.config;
-  // 绳张力与角度记忆都沿径向（对齐时同向），合成径向刚度 K = rope + anchor。
-  const K = cfg.ropeStiffness + cfg.anchorStiffness;
-  const dTheory = (K * cfg.childRopeLength +
-    Math.sqrt(K * K * cfg.childRopeLength * cfg.childRopeLength + 4 * K * cfg.repulsion)) / (2 * K);
-  for (let i = 0; i < 900; i++) step(w);
-  const k = w.cards[1];
-  const dParent = Math.hypot(k.x - w.cards[0].x, k.y - w.cards[0].y);
-  assert.ok(Math.abs(dParent - dTheory) < 8, `parent-child distance = rope equilibrium ${dTheory.toFixed(0)}: ${dParent.toFixed(0)}`);
-  // 绳子可形变：被排斥撑开的量应该只有十几像素，说明它接近定长而不是橡皮筋
-  const stretch = dParent - cfg.childRopeLength;
-  assert.ok(stretch > 0 && stretch < 25, `rope stretches a little, not a lot: +${stretch.toFixed(1)}px`);
-  const speed = Math.hypot(k.vx, k.vy);
-  assert.ok(speed < 1, `child fully at rest: speed=${speed.toFixed(3)}`);
+  const O = id => physics.findCard(w, id)._ox;
+  const Y = id => physics.findCard(w, id)._oy;
+  // Same depth -> same vertical level (relative offsets).
+  for (const id of ['c1', 'c2', 'c3', 'c4']) assert.equal(Y(id), cfg.levelGap);
+  assert.equal(Y('g'), 2 * cfg.levelGap);
+  // root centred over its OUTERMOST children (leftmost & rightmost at depth 1).
+  // NOTE: computeTreeLayout packs children in x-sorted order, so the rightmost
+  // depth-1 child here is c3 (x=400), not c4 (x=200, which has a grandchild).
+  // Check against the actual min/max rather than hard-coding the pair.
+  const xs1 = ['c1', 'c2', 'c3', 'c4'].map(O);
+  assert.ok(Math.abs(O('root') - (Math.min(...xs1) + Math.max(...xs1)) / 2) < 1e-6, 'root centred over outermost children');
+  // Leaves on a level are spaced by nodeGap (minimum pairwise distance).
+  const leafXs = ['c1', 'c2', 'c3'].map(O).sort((a, b) => a - b);
+  let minGap = Infinity;
+  for (let i = 0; i + 1 < leafXs.length; i++) minGap = Math.min(minGap, leafXs[i + 1] - leafXs[i]);
+  assert.ok(Math.abs(minGap - cfg.nodeGap) < 1e-6, `leaf spacing = nodeGap: ${minGap}`);
 });
 
-test('平衡点：父子静止距离符合解析解 K*(d-L)=repulsion/d', () => {
-  // 绳长 L 与排斥平衡：K*(d-L) = repulsion/d → 二次方程正根即理论静止距离。
+test('tidy 静止态：树收敛为整齐层次，无重叠', () => {
   const w = makeWorld({ drift: false });
-  addCard(w, { id: 'p', x: 0, y: 0 });
-  addCard(w, { id: 'k', x: 800, y: 600, parent: 'p' });
+  addCard(w, { id: 'root', x: 0, y: 0 });
+  addCard(w, { id: 'n1', x: 160, y: -160, parent: 'root' });
+  addCard(w, { id: 'n2', x: 260, y: 90, parent: 'root' });
+  addCard(w, { id: 'n3', x: -80, y: 210, parent: 'root' });
+  addCard(w, { id: 'n4', x: -260, y: -90, parent: 'root' });
+  addCard(w, { id: 'n5', x: -260, y: -300, parent: 'n4' });
+  for (let i = 0; i < 1500; i++) step(w);
   const cfg = w.config;
-  // 绳张力与角度记忆都沿径向（对齐时同向），合成径向刚度 K = rope + anchor。
-  const K = cfg.ropeStiffness + cfg.anchorStiffness;
-  const dTheory = (K * cfg.childRopeLength +
-    Math.sqrt(K * K * cfg.childRopeLength * cfg.childRopeLength + 4 * K * cfg.repulsion)) / (2 * K);
-  for (let i = 0; i < 900; i++) step(w);
-  const dActual = Math.hypot(w.cards[1].x - w.cards[0].x, w.cards[1].y - w.cards[0].y);
-  assert.ok(Math.abs(dActual - dTheory) < 5,
-    `equilibrium matches analytic solution: theory=${dTheory.toFixed(1)} actual=${dActual.toFixed(1)}`);
+  const root = physics.findCard(w, 'root');
+  // depth-1 children share a level at ~levelGap below the root.
+  for (const id of ['n1', 'n2', 'n3', 'n4']) {
+    const c = physics.findCard(w, id);
+    assert.ok(Math.abs((c.y - root.y) - cfg.levelGap) < 30, `${id} at level 1`);
+  }
+  // depth-2 grandchild two levels below.
+  const g = physics.findCard(w, 'n5');
+  assert.ok(Math.abs((g.y - root.y) - 2 * cfg.levelGap) < 30, 'n5 at level 2');
+  // root centred over its children.
+  const xs = ['n1', 'n2', 'n3', 'n4'].map(id => physics.findCard(w, id).x);
+  assert.ok(Math.abs(root.x - (Math.min(...xs) + Math.max(...xs)) / 2) < 60, 'root centred over children');
+  // no two cards overlap.
+  let minD = Infinity;
+  for (let i = 0; i < w.cards.length; i++)
+    for (let j = i + 1; j < w.cards.length; j++) {
+      const a = w.cards[i], b = w.cards[j];
+      minD = Math.min(minD, Math.hypot(a.x - b.x, a.y - b.y));
+    }
+  assert.ok(minD > 150, `cards never overlap: minD=${minD.toFixed(0)}`);
 });
 
-test('拖拽中卡片位置由外部控制、不受力积分影响', () => {
+test('拖根：根被拖动时，整棵树跟随（子节点 anchoring 在根上）', () => {
   const w = makeWorld({ drift: false });
-  addCard(w, { id: 'a', x: 0, y: 0 });
-  addCard(w, { id: 'b', x: 0, y: 0, parent: 'a' });
-  w.cards[1].dragging = true;
-  w.cards[1].x = 500;
-  w.cards[1].y = 400;
-  for (let i = 0; i < 60; i++) step(w);
-  assert.equal(w.cards[1].x, 500);
-  assert.equal(w.cards[1].y, 400);
+  addCard(w, { id: 'root', x: 0, y: 0 });
+  addCard(w, { id: 'c1', x: 0, y: 0, parent: 'root' });
+  addCard(w, { id: 'c2', x: 0, y: 0, parent: 'root' });
+  const root = physics.findCard(w, 'root');
+  const c1 = physics.findCard(w, 'c1');
+  const c2 = physics.findCard(w, 'c2');
+  // Grab the root and move it; the children should flow to root + their offset.
+  root.dragging = true;
+  w.dragId = 'root';
+  root.x = 600; root.y = 400;
+  for (let i = 0; i < 400; i++) step(w);
+  assert.equal(root.x, 600);
+  assert.equal(root.y, 400);
+  assert.ok(Math.abs(c1.x - (600 + c1._ox)) < 20, `c1 followed root x: ${c1.x}`);
+  assert.ok(Math.abs(c1.y - (400 + c1._oy)) < 20, `c1 followed root y: ${c1.y}`);
+  assert.ok(Math.abs(c2.x - (600 + c2._ox)) < 20, `c2 followed root x: ${c2.x}`);
 });
 
-test('锚点结构：子卡锚点绕父卡当前位置成环', () => {
+test('拖子：拖一个子节点时，根只小幅移动（树朝手方向轻微倾斜），其子树跟随光标', () => {
   const w = makeWorld({ drift: false });
-  addCard(w, { id: 'p', x: 100, y: 100 });
-  addCard(w, { id: 'k1', x: 0, y: 0, parent: 'p' });
-  addCard(w, { id: 'k2', x: 0, y: 0, parent: 'p' });
-  step(w, 0); // 触发 computeAnchors
-  const a1 = w.anchors.get('k1'), a2 = w.anchors.get('k2');
-  const r1 = Math.hypot(a1.x - 100, a1.y - 100);
-  const r2 = Math.hypot(a2.x - 100, a2.y - 100);
-  assert.ok(Math.abs(r1 - r2) < 1e-9, 'children anchors share ring radius');
-  assert.ok(r1 > 50, `ring radius reasonable: ${r1.toFixed(1)}`);
-  // 父卡移动后锚点跟随
-  w.cards[0].x = 500;
-  step(w, 0);
-  const a1b = w.anchors.get('k1');
-  assert.ok(Math.hypot(a1b.x - 500, a1b.y - 100) > 50, 'anchor follows parent move');
+  addCard(w, { id: 'root', x: 0, y: 0 });
+  addCard(w, { id: 'c1', x: 0, y: 0, parent: 'root' });
+  addCard(w, { id: 'g', x: 0, y: 0, parent: 'c1' });
+  const root = physics.findCard(w, 'root');
+  const c1 = physics.findCard(w, 'c1');
+  const g = physics.findCard(w, 'g');
+  c1.dragging = true;
+  w.dragId = 'c1';
+  c1.x = 1000; c1.y = 0; // yank the child far to the right
+  for (let i = 0; i < 500; i++) step(w);
+  // Root should lean only `childLean` of the way — far from the child.
+  const expectedLean = w.config.childLean * 1000;
+  assert.ok(Math.abs(root.x - expectedLean) < 50, `root leans slightly: ${root.x.toFixed(0)} (expect ~${expectedLean})`);
+  assert.ok(Math.abs(root.x) < 400, `root did NOT follow all the way: ${root.x.toFixed(0)}`);
+  // The dragged child's subtree follows the cursor.
+  assert.ok(Math.abs(g.x - (1000 + g._ox - c1._ox)) < 25, `grandchild followed child x: ${g.x.toFixed(0)}`);
+  assert.ok(Math.abs(g.y - (0 + g._oy - c1._oy)) < 25, `grandchild followed child y: ${g.y.toFixed(0)}`);
 });
 
-// ---- 自由放置（钉住）：拖动过的卡片归用户所有 -------------------------------
-
-test('钉住：拖放到锚点之外后纹丝不动（不回锚、不漂移）', () => {
-  const w = makeWorld(); // 漂移开着，最能暴露"手放好又飘走"
-  addCard(w, { id: 'p', x: 0, y: 0 });
-  addCard(w, { id: 'k', x: 40, y: 30, parent: 'p' });
-  const k = w.cards[1];
-  k.pinned = true;       // pointerdown 时发生
-  k.x = 600;             // 手放到远离 ring 锚点的位置
-  k.y = 420;
-  for (let i = 0; i < 600; i++) step(w);
-  assert.equal(k.x, 600);
-  assert.equal(k.y, 420);
-  assert.equal(k.vx, 0);
-  assert.equal(k.vy, 0);
-});
-
-test('钉住：仍然排斥邻居，但自己不受反作用力', () => {
+test('钉住：钉住的卡片纹丝不动，且作为子树锚点', () => {
   const w = makeWorld({ drift: false });
-  addCard(w, { id: 'pin', x: 0, y: 0, pinned: true });
-  addCard(w, { id: 'free', x: 30, y: 0 });
-  for (let i = 0; i < 300; i++) step(w);
-  const pin = w.cards[0], free = w.cards[1];
-  assert.equal(pin.x, 0, 'pinned card never moves');
-  assert.equal(pin.y, 0);
-  const d = Math.hypot(free.x - pin.x, free.y - pin.y);
-  assert.ok(d > 150, `neighbour pushed away: ${d.toFixed(0)}`);
+  addCard(w, { id: 'root', x: 100, y: 100, pinned: true });
+  addCard(w, { id: 'c', x: 30, y: 20, parent: 'root' });
+  const root = physics.findCard(w, 'root');
+  const c = physics.findCard(w, 'c');
+  for (let i = 0; i < 400; i++) step(w);
+  assert.equal(root.x, 100, 'pinned root never moves');
+  assert.equal(root.y, 100);
+  // child hangs off the pinned root's real position (subroot = pinned root).
+  assert.ok(Math.abs(c.y - (100 + w.config.levelGap)) < 40, `child below pinned root: ${c.y.toFixed(0)}`);
+  assert.ok(Math.abs(c.x - 100) < 60, `child centred on pinned root x: ${c.x.toFixed(0)}`);
 });
 
-test('取消钉住：重新受力并把卡片拉回自己的锚点', () => {
+test('钉住：拖动过的卡片归用户所有（取消钉住后被拉回树的整齐位置）', () => {
   const w = makeWorld({ drift: false });
-  addCard(w, { id: 'solo', x: 0, y: 0 });
-  const c = w.cards[0];
-  c.pinned = true;
-  c.x = 700;
-  c.y = 500;
+  addCard(w, { id: 'root', x: 0, y: 0 });
+  addCard(w, { id: 'k', x: 0, y: 0, parent: 'root' });
+  const k = physics.findCard(w, 'k');
+  k.pinned = true;
+  k.x = 900; k.y = 700; // user dropped it far away
   for (let i = 0; i < 120; i++) step(w);
-  assert.equal(c.x, 700, 'frozen while pinned');
-  c.pinned = false;
+  assert.equal(k.x, 900, 'frozen while pinned');
+  assert.equal(k.y, 700);
+  k.pinned = false;
   for (let i = 0; i < 900; i++) step(w);
-  const back = Math.hypot(c.x - 700, c.y - 500);
-  assert.ok(back > 100, `snaps back once unpinned: moved ${back.toFixed(0)}px`);
+  // snaps back to its tidy offset relative to the root (~levelGap below root, same x).
+  assert.ok(Math.hypot(k.x - 900, k.y - 700) > 200, `returns to the tidy layout: moved ${Math.hypot(k.x - 900, k.y - 700).toFixed(0)}px`);
+  assert.ok(Math.abs(k.y - w.config.levelGap) < 40, `settled at level 1: ${k.y.toFixed(0)}`);
 });
-
-// ---- 休眠（dormancy）：静止的布局就真的静止 ---------------------------------
 
 test('休眠：安定后卡片停止积分，位置逐位冻结', () => {
   const w = makeWorld({ drift: false });
@@ -203,30 +203,6 @@ test('休眠：安定后卡片停止积分，位置逐位冻结', () => {
   assert.equal(c.vy, 0);
 });
 
-test('休眠：被拉动的父卡把子卡唤醒，绳子维持长度', () => {
-  const w = makeWorld({ drift: false });
-  addCard(w, { id: 'p', x: 0, y: 0 });
-  addCard(w, { id: 'k', x: 40, y: 0, parent: 'p' });
-  for (let i = 0; i < 1200; i++) step(w);
-  const p = w.cards[0], k = w.cards[1];
-  assert.equal(k.awake, false, 'child asleep after settling');
-  const d0 = Math.hypot(k.x - p.x, k.y - p.y);
-  const kx0 = k.x;
-  p.pinned = true;
-  p.x -= 400; // yank the parent away, as a drag would: the rope goes taut
-  let woke = false;
-  for (let i = 0; i < 300; i++) {
-    step(w);
-    if (k.awake) woke = true;
-  }
-  const d1 = Math.hypot(k.x - p.x, k.y - p.y);
-  // 绳子只保距不保位：父卡朝子卡冲过去时绳子先松、再被排斥撑回原长，
-  // 所以子卡是「被推开」而不是「被拖着平移」——这是定长绳子的定义行为。
-  assert.ok(woke, 'child woke up when the parent moved');
-  assert.ok(Math.abs(d1 - d0) < 30, `rope keeps its length: ${d0.toFixed(0)} -> ${d1.toFixed(0)}`);
-  assert.ok(Math.abs(k.x - kx0) > 20, `child actually responded: dx=${(k.x - kx0).toFixed(0)}`);
-});
-
 test('整体固定：漂移开着，安定 20s 后 60s 内位移小于 30px', () => {
   const w = makeWorld();
   const tree = [
@@ -242,4 +218,17 @@ test('整体固定：漂移开着，安定 20s 后 60s 内位移小于 30px', ()
     for (const b of base) maxDrift = Math.max(maxDrift, Math.hypot(b.c.x - b.x, b.c.y - b.y));
   }
   assert.ok(maxDrift < 30, `resting layout holds still: max drift ${maxDrift.toFixed(1)}px`);
+});
+
+test('拖拽中卡片位置由外部控制、不受力积分影响', () => {
+  const w = makeWorld({ drift: false });
+  addCard(w, { id: 'a', x: 0, y: 0 });
+  addCard(w, { id: 'b', x: 0, y: 0, parent: 'a' });
+  w.cards[1].dragging = true;
+  w.dragId = 'b';
+  w.cards[1].x = 500;
+  w.cards[1].y = 400;
+  for (let i = 0; i < 60; i++) step(w);
+  assert.equal(w.cards[1].x, 500);
+  assert.equal(w.cards[1].y, 400);
 });

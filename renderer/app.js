@@ -350,7 +350,9 @@
 
   function clearWorld() {
     world.cards.length = 0;
-    world.anchors.clear();
+    world.dragId = null;
+    world.rootHome = { x: 0, y: 0 };
+    world._rootHomeInit = false;
     cardEls.forEach(function (el) { el.remove(); });
     cardEls.clear();
     edgeEls.forEach(function (path) { path.remove(); });
@@ -841,17 +843,23 @@
     });
   }
 
-  // Called when the user grabs a card: it rejoins the float, permanently.
+  // Called when the user grabs a card: it rejoins the float, permanently, and
+  // the physics re-lays the tree out around it (root drag -> whole tree
+  // follows; child drag -> its subtree re-flows at the cursor).
   function onGrab(card) {
     if (!card) return;
+    world.dragId = card.id;
     unpinSubtree(card.id);
     wakeBranch(card.id);
   }
 
-  // Called when the user lets go of a card. The card keeps the position it
-  // was dropped at (no snap-back) but is free to be towed by a later drag.
+  // Called when the user lets go of a card. The tree re-settles into a tidy
+  // diagram: for a root drag the whole tree returns to its canonical home
+  // (rootHome), for a child drag its subtree stays where dropped and the rest
+  // re-tidies around it.
   function onCardPlaced(card) {
     if (!card) return;
+    world.dragId = null;
     markDirty();
   }
 
@@ -1288,48 +1296,40 @@
     var towedEnough = towed >= Math.max(1, Math.ceil(sub.length / 2));
     // The pointer moves the grabbed card only — the branch is moved by the
     // physics on the next tick, never by the pointer.
-    // 240 physics steps with drift on. The dragged card is handed back to the
-    // force field — the rope pulls it to its own length (a root card back to
-    // its radius around the world origin) instead of staying welded where you
-    // dropped it. The branch floats after it and settles into the same
-    // geometry around the new position.
-    for (var s1 = 0; s1 < 240; s1++) CardPhysics.step(world);
-    // The dragged card ended up ON its rope. A root card is moored to the
-    // world origin with rope length = its ring radius, so it comes to rest
-    // at that radius from the origin (a child would rest at rope length
-    // from its parent).
-    // computeAnchors() fills world.anchors in place; it returns nothing.
-    CardPhysics.computeAnchors(world);
-    var rootAnchor = world.anchors.get(card.id);
-    var ropeLen = rootAnchor ? rootAnchor.ringR : 0;
-    var tetherX = rootAnchor && rootAnchor.parentId
-      ? (CardPhysics.findCard(world, rootAnchor.parentId) || { x: 0, y: 0 }).x
-      : 0;
-    var tetherY = rootAnchor && rootAnchor.parentId
-      ? (CardPhysics.findCard(world, rootAnchor.parentId) || { x: 0, y: 0 }).y
-      : 0;
-    var distToTether = Math.hypot(card.x - tetherX, card.y - tetherY);
-    var heldStill = Math.abs(distToTether - ropeLen) < 60;
-    // Where each branch card ended up relative to the grabbed card. The
-    // geometry should be roughly preserved: reached by floating along the
-    // ropes, not by a rigid offset.
-    var followDetail = sub.map(function (s) {
-      var b = before.filter(function (e) { return e.c === s; })[0];
-      return {
-        travel: towedDuringDrag[sub.indexOf(s)],
-        toCard: Math.round(Math.hypot(s.x - card.x, s.y - card.y)),
-        was: Math.round(Math.hypot(b.x - start.x, b.y - start.y))
-      };
+    // Let the tree settle into the tidy layout around where the root landed.
+    for (var s1 = 0; s1 < 300; s1++) CardPhysics.step(world);
+    // The grabbed root is back at rest: it keeps the spot it was dropped, then
+    // the tree tidies around it.
+    var heldStill = Math.hypot(card.vx, card.vy) < 1;
+
+    // Tidy invariant: same-depth nodes share a level and the tree reads as a
+    // clean hierarchy (this is the whole point of the v0.5 re-layout).
+    function depthOf(c) {
+      var d = 0, cur = c, guard = 0;
+      while (cur && cur.parent && guard++ < 1000) { d++; cur = CardPhysics.findCard(world, cur.parent); }
+      return d;
+    }
+    var levelGap = CardPhysics.CONFIG.levelGap;
+    var depth1 = sub.filter(function (s) { return depthOf(s) === 1; });
+    var depth2 = sub.filter(function (s) { return depthOf(s) === 2; });
+    var level1ok = depth1.length > 0 && depth1.every(function (s) {
+      return Math.abs((s.y - card.y) - levelGap) < 90;
     });
-    // Rope semantics: a child on the far side of the grabbed card is TOWED and
-    // travels with it, while one the card moves TOWARD goes slack and is
-    // legitimately left behind (repulsion then pushes it back out to rope
-    // length). So "every child moved" is a spring-era assumption; what must
-    // hold is that the branch keeps its geometry and at least half of it was
-    // actually dragged along.
-    var moved = followDetail.filter(function (d) { return d.travel > 20; }).length;
-    var followed = moved >= Math.max(1, Math.ceil(sub.length / 2)) &&
-      followDetail.every(function (d) { return Math.abs(d.toCard - d.was) < 260; });
+    var level2ok = depth2.every(function (s) {
+      return Math.abs((s.y - card.y) - 2 * levelGap) < 90;
+    });
+    // Horizontal spread: siblings on a level must be clearly separated.
+    var xs = depth1.map(function (s) { return s.x; });
+    var spread = xs.length > 1 ? (Math.max.apply(null, xs) - Math.min.apply(null, xs)) : 999;
+    // No two cards overlap: the tidy layout guarantees spacing.
+    var noOverlap = true;
+    for (var i1 = 0; i1 < world.cards.length && noOverlap; i1++) {
+      for (var j1 = i1 + 1; j1 < world.cards.length; j1++) {
+        var a = world.cards[i1], b = world.cards[j1];
+        if (Math.hypot(a.x - b.x, a.y - b.y) < 120) { noOverlap = false; break; }
+      }
+    }
+    var followed = level1ok && level2ok && spread > 350 && noOverlap;
     // P must work with the pointer STILL ON the card — that is the real
     // gesture (click to select, then press P). A hovered card is frozen by
     // the integrator so its toolbar stays clickable, so togglePin has to
@@ -1369,15 +1369,17 @@
     card.pinned = true; // restore the fixture for the rest of the smoke run
     sub.forEach(function (s) { s.pinned = true; });
     var drag = {
-      ok: !card.dragging && movedBy > 60 && card.vx === 0 &&
+      ok: !card.dragging && movedBy > 60 &&
+        Math.abs(card.vx) < 0.5 && Math.abs(card.vy) < 0.5 &&
         heldStill && towedEnough && followed &&
         pinNow === true && pinnedHolds && unpinnedNow && floatsAgain &&
         unpinnedByDrag,
-      moved: movedBy, vx: card.vx, dragging: card.dragging, branch: sub.length,
+      moved: movedBy, vx: card.vx, vy: card.vy, dragging: card.dragging, branch: sub.length,
       pinned: card.pinned, heldStill: heldStill,
       towed: towedDuringDrag, towedEnough: towedEnough,
-      followed: followed, follow: followDetail, floatsAgain: floatsAgain,
-      unpinnedByDrag: unpinnedByDrag, pinnedHolds: pinnedHolds
+      followed: followed, level1ok: level1ok, level2ok: level2ok,
+      spread: Math.round(spread), noOverlap: noOverlap,
+      floatsAgain: floatsAgain, unpinnedByDrag: unpinnedByDrag, pinnedHolds: pinnedHolds
     };
 
     // 4. clamp: wheel all the way out then all the way in stays in range
