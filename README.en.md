@@ -6,7 +6,7 @@
 
 > TreeNote — the next shape of outline notes: your points arrange themselves into a hierarchy.
 
-A force-directed **tidy-tree card wall** for notes. Break a thought into cards; the parent/child relationships lay themselves out as a clean, layered tree diagram — same-depth nodes share a level, parents centred over their children. Drag once and the whole hierarchy reads at a glance; let go and it settles into one tidy picture.
+A force-directed **tidy-tree card wall** for notes. Break a thought into cards; the parent/child relationships can lay themselves out as a clean, layered tree diagram — same-depth nodes share a level, parents centred over their children. Drag any node anywhere and it stays there; press **one-click tidy** to snap the whole wall back into the standard tree.
 
 Name as many boards as you like and open any of them from the home screen.
 
@@ -29,13 +29,13 @@ Press `H` or the `←` in the top-left to go home. Name a board as you create it
 | Home / open another board | `H` or the `←` in the top-left; click any card to open |
 | Rename the current board | Click the board name in the toolbar (or "rename" on a home card) |
 | Edit a card | Hover it → click ✎ on the action bar, **or just double-click** (Escape cancels, Enter commits) |
-| New child node | Hover it → click ＋ (the new card spawns to its right and enters edit mode) |
+| **New child node** | Hover it → click ＋: a child card fans out **below-right** of this card (never on top of the parent) and opens straight into edit mode |
 | Delete a card | Hover it → click ✕ (or select and press Delete / Backspace) |
 | New card | Double-click empty canvas (attaches to the nearest card within 320px, otherwise it becomes a root) |
 | Re-parent | Drop a card onto another one (dropping onto your own descendant is blocked, to avoid cycles) |
-| **Drag the root** | Drag the **root card** anywhere: the whole tree re-anchors on the root in your hand and **re-packs into a tidy tree**, children reflow, the hierarchy reads at a glance |
-| **Drag a child** | Drag a **child card**: it **and its whole subtree** follow the pointer, while the rest of the tree only **leans slightly** toward your hand (the root moves only ~12%), never a rigid translation |
-| Pin / unpin | Select a card and press `P`: pinned = completely frozen and out of auto-layout (free-place it like Obsidian); unpinned = back in the tidy-tree auto-layout. Works even with the pointer still on the card. New / dragged cards are unpinned by default, so they belong to the tree |
+| **One-click tidy** | Click the "一键整洁" button or press `T`: re-flow the **whole wall into the standard tree** |
+| **Free drag** | Drag any node where you like — it **stays where you drop it** (no snap-back) and the wall becomes free-placed; while dragging, the node and its subtree follow the cursor, everything else holds |
+| Pin / unpin | Select a card and press `P`: pinned = stays put even under one-click tidy (excluded from the tree); unpinned = rejoins the tidy tree. New / dragged cards are unpinned by default, so they belong to the tree |
 | Pan / zoom | Drag empty canvas / scroll wheel (anchored at the cursor, 0.2–2.5) |
 | Debug overlay | `F3` or `Cmd+Shift+D`: fps, card count, sim time, scale, peak speed, mechanical energy, tree target, velocity vectors |
 | Toggle theme | `Cmd/Ctrl+Shift+L`: black canvas ⇄ paper-light; the choice is remembered |
@@ -50,15 +50,19 @@ Every card has a **deterministic tree target** (tidy-tree / Reingold–Tilford s
 - **Parent centred over children**: a parent sits at the midpoint of its outermost children
 - **No subtree overlap**: leaves are packed left-to-right along a shared cursor at `nodeGap` spacing
 
-Then every unpinned card is pulled to its target by a **critically damped spring** (`k = 40`, critical damping `2√k ≈ 12.6`) — it eases onto the target in ~0.6 s with no overshoot, and **never translates a whole branch rigidly**: each card arrives on its own depending on its distance, and the whole tree just resolves into one clean diagram.
+But the spring is **off by default**: since v0.6 the wall starts in **free placement** — every card sits where you left it and nothing tugs on its neighbour, and a drop never snaps back. The spring only engages when you press **one-click tidy** (or when you first open a board), easing the whole wall into the standard tree.
 
-The layout is **deterministic**: the same structure always packs into the same diagram — no randomness. At rest the wall is one tidy tree.
+When engaged, every unpinned card is pulled to its target by a **critically damped spring** (`k = 40`, critical damping `2√k ≈ 12.6`) — it eases onto the target in ~0.6 s with no overshoot, and **never translates a whole branch rigidly**: each card arrives on its own depending on its distance, and the whole tree just resolves into one clean diagram.
 
-### Three drag feels
+The layout is **deterministic**: the same structure always packs into the same diagram — no randomness. At rest in tidy mode the wall is one tidy tree; at rest in free mode each card is frozen in place, untugged.
 
-- **Drag the root**: the whole tree re-anchors on the root in your hand and re-packs; children reflow into the tree
-- **Drag a child**: its whole subtree follows the cursor as a tidy unit; the rest of the tree leans only `childLean = 0.12` toward the hand — the root moves only about 12% of the way ("when you move a child, the root barely moves")
-- **Descendants of the dragged card**: automatically re-anchor on the cursor, so grabbing a middle node brings its entire subtree along
+### Free drag feels
+
+- **Drag any node**: it stays exactly where you drop it, and the wall becomes free-placed — no snap-back to the tree, no rigid translation of the whole board.
+- **Drag carries the subtree**: in either mode, the card you grab brings its **whole subtree** along, following the cursor; everything else stays put and is not tugged.
+- **Dragging a root while tidy**: if the board is currently tidy (just opened or just tidied), dragging the root re-anchors the whole tree on the root in your hand; dragging a child makes its subtree follow while the rest only **leans `childLean = 0.12`** toward the hand (the root moves only ~12%). The moment you let go, the wall switches back to free mode.
+
+**Where does it stop?** The card you dragged **stays where you let go**, and so does everything else — the wall is now free-placed and no longer auto-arranges. To re-flow the whole wall into the standard tree, press **one-click tidy** (button or `T`). To make a single card immovable even under tidy, pin it with `P`.
 
 ### Key parameters (`CONFIG` in `renderer/physics.js`)
 
@@ -72,15 +76,15 @@ The layout is **deterministic**: the same structure always packs into the same d
 | `driftImpulse` / `driftChance` | 3 px/s / 0.0002 | A very faint, reproducible Brownian "breath" at rest (occasionally wakes a card for one ripple) |
 | `sleepSpeed` / `sleepForce` / `sleepSteps` | 0.6 px/s / 30 px/s² / 60 steps | Sleep criteria: slow enough, weak enough net force, for long enough → stop integrating |
 
-At rest a card sits exactly on its tree target (the spring is zero and no other force acts), so the wall is a **fixed picture**, not a pile of cards that jitters forever; and because repulsion only acts during a drag, a quiet card's net force falls below the sleep threshold and it truly goes to sleep.
+In tidy mode a card sits exactly on its tree target (the spring is zero and no other force acts), so the wall is a **fixed picture**, not a pile of cards that jitters forever; and because repulsion only acts during a drag, a quiet card's net force falls below the sleep threshold and it truly goes to sleep. In free mode the same holds — cards simply hold where you left them, untugged.
 
-### Pinning is protection, not a shackle
+### Pinning excludes from the tree, it doesn't freeze everything
 
-`pinned` means "you placed this card by hand, so leave it where it belongs" — it **opts out of auto-layout**, freezes completely, and free-places like Obsidian. Its descendants hang off its real position.
+`pinned` means "you placed this card by hand, so don't move it even under one-click tidy" — it is **excluded from the tidy tree** and frozen completely. Its descendants hang off its real position.
 
-- A **newly created card** is pinned: you just put it there, so it should stay
-- The moment you **drag a card**, it **and its whole subtree** are unpinned, permanently. You have taken it into the tree layout, so dragging its parent can now tow it along
-- **`P`** is the manual override, in either direction, and flips the subtree together (a card that rejoins the layout while its children stay pinned is still a card its parent can't drag around)
+- A **newly created card** is **unpinned by default**: it belongs to the tree and joins the re-flow when you press tidy
+- The moment you **drag a card**, it **and its whole subtree** are unpinned, permanently — you have handed it back to the tree layout
+- **`P`** is the manual override, in either direction, and flips the subtree together (a card that rejoins the tree while its children stay pinned is still a card its parent can't drag around)
 
 That is the answer to "can one node carry the others": yes, as long as that card isn't pinned.
 
@@ -104,7 +108,7 @@ Auto-layout is deterministic, not a random initial guess. Unpinned cards **fall 
 ```bash
 npm install
 npm start          # normal launch
-npm test           # physics unit tests (12)
+npm test           # physics unit tests (14)
 npm run smoke      # ten-layer self-check: render / camera / debug / theme / interaction / editor / toolbar / persist / home / load
 npm run dist       # package the macOS dmg → dist/cardwall-<version>-arm64.dmg
 ```
@@ -132,7 +136,7 @@ renderer/interaction.js Pan / cursor-anchored zoom / dragging / re-parenting
 renderer/debug.js       F3 overlay
 renderer/sample.js      The sample tree shown on first launch
 build/icon.svg          Icon source; build/icon.icns is rasterised from it
-test/physics.test.mjs   12 unit tests
+test/physics.test.mjs   14 unit tests
 ```
 
 Every colour comes from the semantic tokens at the top of `styles.css` (`--bg` / `--surface` / `--ink` / `--edge` …), so one token block *is* a theme: `:root` is the default dark (pure black canvas) and `[data-theme="light"]` overrides the same tokens for the paper-light look. To add a third theme, copy a token block and teach `applyTheme` one more name — no component styles need to change.

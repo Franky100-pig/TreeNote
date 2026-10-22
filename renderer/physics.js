@@ -4,30 +4,36 @@
  * Pure logic, zero dependencies: UMD-wrapped so the same module runs in
  * Node (unit tests) and the browser (renderer).
  *
- * Model (v0.5 — replaces the old rope/anchor "floating" model):
+ * Model (v0.6 — free placement + one-click tidy):
  *
- *   The board is a HIERARCHY, not a cloud. Every card has a deterministic
- *   TREE TARGET computed by a tidy-tree algorithm (Reingold–Tilford style:
- *   same-depth nodes share a horizontal level, a parent centres over its
- *   children, subtrees never overlap). Each non-pinned card is then pulled
- *   to its target by a CRITICALLY DAMPED spring — so it eases into place
- *   with no overshoot and no "rigid branch translation": every card arrives
- *   on its own (different distances -> different arrival times), the whole
- *   tree just resolves into a clean diagram.
+ *   The board is a HIERARCHY. Every card has a deterministic TREE TARGET from
+ *   a tidy-tree layout (Reingold–Tilford style: same depth shares a level, a
+ *   parent centres over its children, subtrees never overlap). BUT the pull
+ *   toward that target is OPTIONAL, gated by `world.tidy`:
  *
- *   Resting state: the tree is a tidy diagram. Touching a card re-runs the
- *   layout around it:
+ *     • world.tidy === false (the DEFAULT): cards are FREE. Each node holds
+ *       wherever it is — you can drag any node anywhere and it stays there.
+ *       This is the "给足自由度" interaction the user asked for.
+ *     • world.tidy === true: every non-pinned card is pulled to its tree
+ *       target by a CRITICALLY DAMPED spring (k=40, no overshoot), so the
+ *       board eases into a clean diagram. This is engaged ONLY by the
+ *       "一键整洁" button (physics.tidy) — or on board load.
+ *
+ *   So dragging is always free: the dragged card (and its subtree, which
+ *   follows the cursor) stays where you let go; nothing snaps back. Pressing
+ *   tidy re-flows the WHOLE board into the standard tree. Drop = freedom,
+ *   tidy = reset. That is the whole interaction model.
+ *
+ *   Drag-time behaviour (while a card IS being dragged, tidy or not):
  *     • drag the ROOT  -> the whole tree re-anchors on the root, so every
  *       child follows the one card in your hand.
  *     • drag a CHILD   -> that subtree re-flows under your cursor, and the
  *       rest of the tree leans only slightly toward your hand (the root
- *       drifts `childLean` of the way, not all the way). This is the
- *       "移动子的时候根小幅度移动" behaviour.
+ *       drifts `childLean` of the way, not all the way).
  *
  *   Pinned cards opt out of the layout entirely and keep exactly where the
- *   user put them (Obsidian-style free placement). Their descendants hang
- *   off the pinned card's real position. Pinning is the escape hatch from
- *   the auto-layout; a newly created or dropped card starts pinned.
+ *   user put them (Obsidian-style freeze). `P` toggles pin; a newly created
+ *   card starts UNPINNED (it joins the float / free placement).
  *
  * Integration: fixed-step semi-implicit Euler; a card being dragged is
  * positioned externally and its velocity is recorded by the caller. Dormancy
@@ -109,8 +115,9 @@
       rng: mulberry32(options.seed == null ? 1 : options.seed),
       drift: options.drift == null ? true : options.drift,
       dragId: null,                       // id of the card currently dragged (or null)
-      rootHome: { x: 0, y: 0 },           // resting anchor of the primary root
+      rootHome: { x: 0, y: 0 },           // resting anchor of the primary root (used only while tidy)
       _rootHomeInit: false,               // set after rootHome is first parked
+      tidy: false,                        // false = FREE placement (default); true = pull to tree
       _roots: [],                         // tree roots (parent === null), filled by layout
       config: Object.assign({}, CONFIG, options.config || {})
     };
@@ -181,10 +188,9 @@
     // Deterministic child order. IMPORTANT: order only by id, NEVER by the
     // card's current x. If the order depended on live positions, dragging a
     // node far would flip the packing order, change every node's offset (_ox),
-    // and feed back into the next layout — so a dropped card would drift off
-    // its anchor instead of holding still. Ordering by id makes the layout a
-    // pure function of tree structure, which is what `reanchorOnDrop` relies
-    // on to keep a dropped card exactly where it landed.
+    // and feed back into the next layout. Ordering by id makes the layout a
+    // pure function of tree structure, which is what physics.tidy() relies on
+    // to re-flow the board into a clean diagram on demand.
     byParent.forEach(function (kids) {
       kids.sort(function (a, b) {
         return a.id < b.id ? -1 : (a.id > b.id ? 1 : 0);
@@ -284,17 +290,14 @@
 
     var dragged = world.dragId ? findCard(world, world.dragId) : null;
 
-    // Park the primary root's resting anchor ONCE, on the first step. This must
-    // be a FIXED point thereafter: if we re-anchored rootHome to the root's
-    // live position every idle frame, the root's target would chase its own
-    // position (zero restoring force) and the whole tree would drift. And if we
-    // refreshed it whenever the root happened to be asleep, we would clobber the
-    // shift that `reanchorOnDrop` applies on a card drop (the user's "keep it
-    // where I let go" gesture). So: set it once here, then only `reanchorOnDrop`
-    // is allowed to move rootHome. This keeps both the no-drift and the
-    // no-snap-back guarantees at the same time.
+    // Park the primary root's resting anchor ONCE, on the first tidy step.
+    // This is only relevant while world.tidy is engaged. When the board is
+    // free (tidy === false) there is no pull, so rootHome is irrelevant and we
+    // leave it alone. The anchor is a FIXED point thereafter: physics.tidy()
+    // is the only thing that may move it (it re-anchors on the root's current
+    // position so the tree reconstructs in place, not at the origin).
     var primaryRoot = world._roots && world._roots[0];
-    if (!dragged && primaryRoot && !world._rootHomeInit) {
+    if (world.tidy && !dragged && primaryRoot && !world._rootHomeInit) {
       world.rootHome = { x: primaryRoot.x, y: primaryRoot.y };
       world._rootHomeInit = true;
     }
@@ -338,15 +341,29 @@
     }
 
     // 3. tree-target pull — the "arrange into a tree" force. Critically damped.
-    var cDamp = 2 * Math.sqrt(cfg.k);
-    for (var p = 0; p < n; p++) {
-      var card = cards[p];
-      if (card.dragging || card.pinned) continue; // controlled externally / frozen
-      var t = targetOf(world, card, dragged, anchor);
-      card.tx = t.x; card.ty = t.y;
-      // Damped harmonic oscillator, mass = 1: a = k*(target - x) - cDamp*v
-      card.fx += cfg.k * (t.x - card.x) - cDamp * card.vx;
-      card.fy += cfg.k * (t.y - card.y) - cDamp * card.vy;
+    // Engaged in two situations:
+    //   • tidy mode (no drag): every non-pinned card eases into the full tree.
+    //   • a card is being dragged on a FREE board (tidy === false): only the
+    //     grabbed card's subtree is pulled to follow the cursor — the rest of
+    //     the board holds exactly where the user left it (full freedom for
+    //     everything else). This is the v0.6 "give the user freedom while
+    //     dragging" contract: grab a branch and the branch moves; release and
+    //     the whole board becomes free and stays where it was dropped.
+    // On drag RELEASE tidy is flipped off (see app.onCardPlaced), so nothing
+    // snaps back to the tree — the board simply holds where it was dropped.
+    if (world.tidy || dragged) {
+      var cDamp = 2 * Math.sqrt(cfg.k);
+      for (var p = 0; p < n; p++) {
+        var card = cards[p];
+        if (card.dragging || card.pinned) continue; // controlled externally / frozen
+        // Free board + dragging: move only the grabbed branch; leave the rest.
+        if (!world.tidy && dragged && !isDescendant(world, card.id, dragged.id)) continue;
+        var t = targetOf(world, card, dragged, anchor);
+        card.tx = t.x; card.ty = t.y;
+        // Damped harmonic oscillator, mass = 1: a = k*(target - x) - cDamp*v
+        card.fx += cfg.k * (t.x - card.x) - cDamp * card.vx;
+        card.fy += cfg.k * (t.y - card.y) - cDamp * card.vy;
+      }
     }
 
     // 4. drag wake — a moving card carries its neighbours a little. Pure push,
@@ -373,8 +390,10 @@
       dcard._py = dcard.y;
     }
 
-    // 5. seeded Brownian drift (a faint, reproducible life at rest).
-    if (world.drift) {
+    // 5. seeded Brownian drift (a faint, reproducible life) — only while the
+    //    board is in tidy mode. A FREE board (tidy === false) must hold exactly
+    //    where the user placed it, so there is no drift and no scatter.
+    if (world.drift && world.tidy) {
       for (var g = 0; g < n; g++) {
         if (cards[g].pinned || cards[g].dragging) continue;
         if (world.rng() < cfg.driftChance) {
@@ -438,25 +457,24 @@
   }
 
   /**
-   * Re-anchor the tidy-tree on a dropped card so it STAYS where the user let
-   * go and the rest of the tree re-flows around it — instead of the whole
-   * board springing back to the canonical home (the v0.5 "松手都弹回去了" bug).
+   * One-click tidy: re-flow the ENTIRE board into the standard tidy tree.
    *
-   * We shift `rootHome` by the difference between the card's canonical target
-   * (its tidy position relative to the current anchor) and its actual dropped
-   * position. After this, the card's target equals its drop point, so it holds
-   * still; every other card's target shifts by the same vector, so the tree
-   * re-tidies around the new anchor. Works for both root and child drags.
+   * Recomputes the layout, anchors the tree at the primary root's CURRENT
+   * position (so the tree reconstructs IN PLACE rather than jumping to the
+   * origin), and engages the spring pull so every card eases into its
+   * canonical slot. This is the "一键整洁" button — it is the ONLY thing that
+   * imposes the tree. By default (world.tidy === false) cards are free and
+   * hold wherever they are; releasing a drag flips tidy off (see
+   * app.onCardPlaced), so the tree is rebuilt only on demand.
    */
-  function reanchorOnDrop(world, card) {
-    if (!card || card.pinned) return;
+  function tidy(world) {
     computeTreeLayout(world);
-    var t = targetOf(world, card, null, world.rootHome);
-    world.rootHome = {
-      x: world.rootHome.x + (card.x - t.x),
-      y: world.rootHome.y + (card.y - t.y)
-    };
+    var primaryRoot = world._roots && world._roots[0];
+    if (primaryRoot) {
+      world.rootHome = { x: primaryRoot.x, y: primaryRoot.y };
+    }
     world._rootHomeInit = true;
+    world.tidy = true;
   }
 
   /**
@@ -502,7 +520,7 @@
     targetOf: targetOf,
     step: step,
     wake: wake,
-    reanchorOnDrop: reanchorOnDrop,
+    tidy: tidy,
     totalEnergy: totalEnergy,
     mulberry32: mulberry32
   };

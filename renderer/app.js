@@ -196,6 +196,7 @@
   function serialize() {
     return {
       version: 1,
+      tidy: !!world.tidy,
       cards: world.cards.map(function (c) {
         return {
           id: c.id,
@@ -353,6 +354,7 @@
     world.dragId = null;
     world.rootHome = { x: 0, y: 0 };
     world._rootHomeInit = false;
+    world.tidy = false;
     cardEls.forEach(function (el) { el.remove(); });
     cardEls.clear();
     edgeEls.forEach(function (path) { path.remove(); });
@@ -371,6 +373,10 @@
   function openBoardInto(board) {
     clearWorld();
     if (board && Array.isArray(board.cards)) seedCards(board.cards);
+    // Restore the tidy flag: a board saved while tidy reopens as a clean tree;
+    // one saved while free reopens exactly where the user left it. A fresh
+    // board (no saved flag) opens as a tidy tree — the standard layout.
+    world.tidy = !board || board.tidy === undefined ? true : !!board.tidy;
     buildDOM();
     world.cards.forEach(measure);
     applyFit(90);
@@ -624,6 +630,8 @@
   boardNameEl.addEventListener('click', function () {
     if (currentBoard.id) renameBoardById(currentBoard.id, currentBoard.name);
   });
+  var tidyBtn = document.getElementById('tidy-btn');
+  if (tidyBtn) tidyBtn.addEventListener('click', function () { tidyAll(); });
   newBoardBtn.addEventListener('click', function () {
     askName({ title: '新的一幅图', value: '' }).then(function (name) {
       if (name == null) return;
@@ -785,14 +793,30 @@
   function createCard(worldPoint, parentId) {
     var id = 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
     var parent = parentId && CardPhysics.findCard(world, parentId) ? parentId : null;
+    var pos;
+    if (parent) {
+      // Grow a CHILD of the current node, placed clearly BELOW it (the
+      // canonical child level) and fanned out to the right for each sibling —
+      // so repeated "+" adds never stack on top of the parent or each other.
+      // This fixes the old bug where the child was dropped at the click point
+      // and visually overwrote the node it hung from.
+      var pCard = CardPhysics.findCard(world, parent);
+      var sibCount = world.cards.filter(function (c) { return c.parent === parent; }).length;
+      pos = {
+        x: pCard.x + sibCount * world.config.nodeGap,
+        y: pCard.y + world.config.levelGap + 40
+      };
+    } else {
+      pos = worldPoint; // a free node dropped on empty canvas
+    }
     var card = CardPhysics.addCard(world, {
       id: id,
-      x: worldPoint.x,
-      y: worldPoint.y,
+      x: pos.x,
+      y: pos.y,
       parent: parent,
       title: '',
       note: '',
-      pinned: true // created where you clicked — it stays there
+      pinned: false // joins the float / free placement
     });
     var el = buildCardEl(card);
     worldEl.appendChild(el);
@@ -855,18 +879,26 @@
 
   // Called when the user lets go of a card.
   //
-  // KEY FIX (v0.5.1): the dragged card MUST stay where the user dropped it,
-  // and the rest of the tree re-flows around it — NOT spring back to the
-  // canonical diagram. Before this, drag only "unlocked" the subtree into the
-  // tree, but on release every unpinned card's target was still its canonical
-  // tidy position, so the whole board snapped back to rootHome (the bug the
-  // user reported as "松手都弹回去了"). reanchorOnDrop shifts rootHome so the
-  // dropped card's target equals its drop point; see physics.reanchorOnDrop.
+  // v0.6 model: RELEASE = FREE. The dragged card (and, because we dropped the
+  // always-on tidy in favour of on-demand tidy, the whole board) stays exactly
+  // where it was dropped — nothing springs back to the tree. The tidy tree is
+  // rebuilt only by the "一键整洁" button (tidyAll), so the user owns every
+  // node's position until they ask for the standard layout.
   function onCardPlaced(card) {
     if (!card) return;
-    CardPhysics.reanchorOnDrop(world, card);
+    world.tidy = false;
     world.dragId = null;
     markDirty();
+  }
+
+  // "一键整洁": re-flow the whole board into the standard tidy tree. This is
+  // the ONLY thing that imposes the tree on a free board (v0.6 model).
+  function tidyAll() {
+    CardPhysics.tidy(world);
+    // wake every card so the spring actually moves it (dormant cards freeze).
+    world.cards.forEach(function (c) { c.awake = true; c.still = 0; });
+    markDirty();
+    syncDOM();
   }
 
   // Pinned = free placement: no snap-back, no drift, no integration. Flipped
@@ -965,10 +997,11 @@
     if (act === 'edit') {
       startEdit(card);
     } else if (act === 'add') {
-      // Grow a child to the right of this card; it lands pinned where we put
-      // it and opens straight into edit mode.
-      var off = (card.domW || 250) / 2 + 180;
-      createCard({ x: card.x + off, y: card.y }, card.id);
+      // Grow a CHILD of this card: createCard hangs it off `card` and places
+      // it fanned out below-right (never on top of the parent, so the old
+      // "child overwrites the node it hangs from" bug cannot recur), then
+      // opens it straight into edit mode.
+      createCard(null, card.id);
     } else if (act === 'del') {
       deleteCard(card.id);
     }
@@ -1058,6 +1091,9 @@
     if ((e.key === 'Delete' || e.key === 'Backspace') && selectedId) {
       e.preventDefault();
       deleteCard(selectedId);
+    } else if ((e.key === 't' || e.key === 'T')) {
+      e.preventDefault();
+      tidyAll();
     } else if ((e.key === 'p' || e.key === 'P') && selectedId) {
       e.preventDefault();
       togglePin(selectedId);
@@ -1254,9 +1290,10 @@
       scaleBefore: before.scale, scaleAfter: after.scale
     };
 
-    // 3. card drag: grab the first card, move +80px, release.
-    //    The branch is NOT translated with the pointer — it is towed by the
-    //    ropes, so it trails behind and floats into place.
+    // 3. card drag + one-click tidy (v0.6 model).
+    //    Drag gives FULL FREEDOM: grab a card and its subtree follows the
+    //    cursor, but on release nothing snaps back — the board stays where you
+    //    let go. The tidy tree is rebuilt only by the "一键整洁" button.
     var cardEl = document.querySelector('.card');
     var card = CardPhysics.findCard(world, cardEl.dataset.id);
     var sub = descendantsOf(card.id);
@@ -1269,6 +1306,7 @@
       c.awake = true;
       c.still = 0;
     });
+    var beforeAll = world.cards.map(function (c) { return { c: c, x: c.x, y: c.y }; });
     var before = [card].concat(sub).map(function (c) { return { c: c, x: c.x, y: c.y }; });
     var rect = cardEl.getBoundingClientRect();
     var cx = rect.left + rect.width / 2, cy = rect.top + rect.height / 2;
@@ -1276,9 +1314,9 @@
     fire('pointerdown', cardEl, cx, cy);
     fire('pointermove', cardEl, cx + 40, cy);
     // Step the physics while the card is still held: the branch is towed by
-    // the rope, and that only shows up once the integrator has run. (The
-    // synthetic pointer events do not advance the rAF loop, so we step it
-    // by hand here.)
+    // the tree re-flow, and that only shows up once the integrator has run.
+    // (The synthetic pointer events do not advance the rAF loop, so we step
+    // it by hand here.)
     for (var d1 = 0; d1 < 30; d1++) CardPhysics.step(world);
     var towedDuringDrag = sub.map(function (s) {
       var b = before.filter(function (e) { return e.c === s; })[0];
@@ -1287,47 +1325,45 @@
     fire('pointermove', cardEl, cx + 80, cy);
     for (var d2 = 0; d2 < 30; d2++) CardPhysics.step(world);
     fire('pointerup', cardEl, cx + 80, cy);
-    var dropped = { x: card.x, y: card.y };
-    var movedBy = card.x - start.x; // 80 screen px expressed in world units
+    var movedBy = card.x - start.x; // ~80 screen px expressed in world units
     // New pin semantics: grabbing a card hands it AND its whole subtree back
     // to the force field, permanently. This is the fix for "one node does not
     // carry the others": a pinned card opts out of every force, including the
-    // rope, so a pinned subtree could never be towed.
+    // tree pull, so a pinned subtree could never be towed.
     var subtreeUnpinned = sub.every(function (s) { return s.pinned === false; }) &&
       card.pinned === false;
     // The branch was actually TOWED: at least half of it travelled a real
-    // distance while the card was held. This is the assertion that would
-    // have failed before the fix (a pinned subtree travels 0px).
+    // distance while the card was held.
     var towed = towedDuringDrag.filter(function (t) { return t > 20; }).length;
     var towedEnough = towed >= Math.max(1, Math.ceil(sub.length / 2));
-    // The pointer moves the grabbed card only — the branch is moved by the
-    // physics on the next tick, never by the pointer.
-    // Let the tree settle into the tidy layout around where the root landed.
+
+    // Release => FREE: onCardPlaced set world.tidy = false, so the board no
+    // longer auto-tidies and the dropped card holds exactly where it landed.
     for (var s1 = 0; s1 < 300; s1++) CardPhysics.step(world);
-    // The grabbed root is back at rest: it keeps the spot it was dropped, then
-    // the tree tidies around it.
     var heldStill = Math.hypot(card.vx, card.vy) < 1;
 
-    // Tidy invariant: same-depth nodes share a level and the tree reads as a
-    // clean hierarchy (this is the whole point of the v0.5 re-layout).
+    // "一键整洁": re-tree the WHOLE board — the only thing that imposes the
+    // tree on a free board. With everything unpinned and tidy engaged, the
+    // spring pulls every card into the canonical tidy diagram.
+    world.cards.forEach(function (c) { c.pinned = false; c.awake = true; c.still = 0; });
+    CardPhysics.tidy(world);
+    for (var s2 = 0; s2 < 400; s2++) CardPhysics.step(world);
     function depthOf(c) {
       var d = 0, cur = c, guard = 0;
       while (cur && cur.parent && guard++ < 1000) { d++; cur = CardPhysics.findCard(world, cur.parent); }
       return d;
     }
     var levelGap = CardPhysics.CONFIG.levelGap;
-    var depth1 = sub.filter(function (s) { return depthOf(s) === 1; });
-    var depth2 = sub.filter(function (s) { return depthOf(s) === 2; });
+    var depth1 = world.cards.filter(function (c) { return depthOf(c) === 1; });
+    var depth2 = world.cards.filter(function (c) { return depthOf(c) === 2; });
     var level1ok = depth1.length > 0 && depth1.every(function (s) {
       return Math.abs((s.y - card.y) - levelGap) < 90;
     });
     var level2ok = depth2.every(function (s) {
       return Math.abs((s.y - card.y) - 2 * levelGap) < 90;
     });
-    // Horizontal spread: siblings on a level must be clearly separated.
     var xs = depth1.map(function (s) { return s.x; });
     var spread = xs.length > 1 ? (Math.max.apply(null, xs) - Math.min.apply(null, xs)) : 999;
-    // No two cards overlap: the tidy layout guarantees spacing.
     var noOverlap = true;
     for (var i1 = 0; i1 < world.cards.length && noOverlap; i1++) {
       for (var j1 = i1 + 1; j1 < world.cards.length; j1++) {
@@ -1336,44 +1372,34 @@
       }
     }
     var followed = level1ok && level2ok && spread > 350 && noOverlap;
-    // P must work with the pointer STILL ON the card — that is the real
-    // gesture (click to select, then press P). A hovered card is frozen by
-    // the integrator so its toolbar stays clickable, so togglePin has to
-    // clear `hover`; otherwise P looks dead until the mouse moves away.
-    // This goes through the real key handler, not togglePin directly.
-    //
-    // Under the new semantics the card is already unpinned (the drag handed
-    // it to the force field), so P PINS it: it must stop moving even with
-    // the pointer on it. Then P again releases it and it must move again.
+
+    // P works while the tree is held (tidy on): pin freezes, unpin re-floats.
     select(card.id);
     card.hover = true; // pointer resting on the card (what mouseenter would set)
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'p', bubbles: true, cancelable: true }));
     var pinNow = card.pinned;               // P pinned it
     var posAtPin = { x: card.x, y: card.y };
-    for (var s2 = 0; s2 < 60; s2++) CardPhysics.step(world);
+    for (var s3 = 0; s3 < 60; s3++) CardPhysics.step(world);
     var pinnedHolds = Math.hypot(card.x - posAtPin.x, card.y - posAtPin.y) < 1;
     // P again: back into the float, and it must start moving. Nudge it off
-    // its equilibrium first — a card that is already exactly at its rope
-    // length is in balance, so releasing it there legitimately moves nothing.
+    // its equilibrium first — a card already at its tree target is in
+    // balance, so releasing it there legitimately moves nothing.
     card.hover = true;
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'p', bubbles: true, cancelable: true }));
     var unpinnedNow = card.pinned === false;
-    card.x += 60; card.y += 30; // off-balance, so the rope has work to do
+    card.x += 60; card.y += 30; // off-balance, so the tidy pull has work to do
     var posAtRelease = { x: card.x, y: card.y };
-    for (var s3 = 0; s3 < 60; s3++) CardPhysics.step(world);
+    for (var s4 = 0; s4 < 60; s4++) CardPhysics.step(world);
     var floatsAgain = Math.hypot(card.x - posAtRelease.x, card.y - posAtRelease.y) > 1;
-    // Restore the whole branch and leave the grabbed card where it was
-    // dropped, so later checks and the persisted board see a deterministic
-    // layout.
-    before.forEach(function (e) { e.c.x = e.x; e.c.y = e.y; });
+
+    // Restore the whole board to its pre-check snapshot so later checks and
+    // the persisted board see a deterministic layout.
+    beforeAll.forEach(function (e) { e.c.x = e.x; e.c.y = e.y; });
+    world.cards.forEach(function (c) { c.pinned = true; c.awake = true; c.still = 0; });
+    world.tidy = false;
     card.vx = 0;
     card.vy = 0;
-    // New pin semantics: a card you have dragged has LEFT the pinned state
-    // for good (it belongs to the float now, and a later drag of its parent
-    // can tow it). P is the manual override in the other direction.
     var unpinnedByDrag = subtreeUnpinned;
-    card.pinned = true; // restore the fixture for the rest of the smoke run
-    sub.forEach(function (s) { s.pinned = true; });
     var drag = {
       ok: !card.dragging && movedBy > 60 &&
         Math.abs(card.vx) < 0.5 && Math.abs(card.vy) < 0.5 &&

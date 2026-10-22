@@ -1,7 +1,7 @@
 {
   "name": "cardwall",
-  "version": "0.5.1",
-  "description": "力导向整齐树卡片墙笔记工具 — 要点级卡片、树状自动分层、拖根重排 / 拖子微倾",
+  "version": "0.6.0",
+  "description": "力导向整齐树卡片墙笔记工具 — 自由拖拽每个节点、松手不回弹，一键整洁回到标准树；加号挂子节点",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
