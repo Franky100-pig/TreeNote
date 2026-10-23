@@ -61,11 +61,17 @@ body {
   background: var(--bg);
   color: var(--ink);
   font-family: -apple-system, "PingFang SC", "Helvetica Neue", sans-serif;
+  /* Stop iOS from inflating text in landscape / on rotate. */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
 #app {
   width: 100%;
   height: 100%;
+  /* Mobile browser chrome shows/hides as you scroll; dvh tracks the truly
+     visible viewport so the canvas never ends up half under the URL bar. */
+  height: 100dvh;
 }
 
 /* ---- toolbar ---------------------------------------------------------- */
@@ -103,6 +109,10 @@ body {
   cursor: grab;
   user-select: none;
   -webkit-user-select: none;
+  /* The canvas owns every gesture: no page scroll, no pull-to-bounce, no
+     browser pinch-zoom — all of that is handled in interaction.js. */
+  touch-action: none;
+  -webkit-touch-callout: none;
 }
 
 #viewport.panning {
@@ -768,4 +778,93 @@ body {
 #dialog-ok:hover {
   background: var(--accent-soft-ring);
   color: var(--ink);
+}
+
+/* ---- touch devices (phones / tablets) ---------------------------------- */
+/* Hover does not exist here: the action bar appears on TAP (the card gets
+   .selected), so its buttons must be finger-sized, not mouse-sized. */
+@media (pointer: coarse) {
+  .card-toolbar {
+    gap: 4px;
+    padding: 4px;
+  }
+
+  .card-toolbar button {
+    width: 34px;
+    height: 34px;
+    font-size: 15px;
+    border-radius: 8px;
+  }
+
+  /* Clear the (now bigger) action bar. */
+  .card-title {
+    padding-right: 46px;
+  }
+
+  /* Comfortable tap targets on the top bar. */
+  #tidy-btn,
+  #home-top-btn,
+  #guidance-btn {
+    padding: 9px 14px;
+  }
+}
+
+/* ---- narrow screens (phones in portrait) ------------------------------- */
+@media (max-width: 720px) {
+  #toolbar {
+    height: 52px;
+    padding: 0 10px;
+    gap: 8px;
+  }
+
+  #tidy-btn { font-size: 12.5px; padding: 8px 12px; }
+  #home-top-btn { font-size: 12px; padding: 8px 10px; }
+  #guidance-btn { font-size: 12px; padding: 8px 10px; letter-spacing: 0; }
+
+  /* Cards must never be wider than the phone. */
+  .card {
+    width: min(250px, calc(100vw - 40px));
+  }
+
+  /* Guidance becomes a bottom sheet: thumb-reachable, safe-area aware. */
+  #guidance {
+    align-items: flex-end;
+    padding: 10px;
+  }
+
+  .guidance-inner {
+    width: 100%;
+    max-height: 86dvh;
+    border-radius: 16px 16px 0 0;
+    padding-bottom: calc(18px + env(safe-area-inset-bottom));
+  }
+
+  /* The library: one column, tighter gutters, stacked header. */
+  #home {
+    inset: 52px 0 0 0;
+    padding: 18px 14px 40px;
+  }
+
+  .home-head {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  .home-head-actions {
+    justify-content: flex-end;
+  }
+
+  #board-list {
+    grid-template-columns: 1fr;
+  }
+
+  .dialog-inner {
+    width: calc(100vw - 28px);
+  }
+
+  #debug-panel {
+    font-size: 10px;
+    min-width: 160px;
+  }
 }

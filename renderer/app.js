@@ -1394,7 +1394,35 @@
     var minScale = view.scale;
     var clamp = { ok: maxScale <= 2.5 + 1e-9 && minScale >= 0.2 - 1e-9, maxScale: maxScale, minScale: minScale };
 
-    return { pan: pan, zoom: zoom, drag: drag, clamp: clamp, ok: pan.ok && zoom.ok && drag.ok && clamp.ok };
+    // 5. pinch (touch gesture, used by the web build): two fingers spread
+    //    apart -> zoom in (clamped); the midpoint drag pans; lifting both
+    //    fingers must leave a single-pointer pan fully working (no leftover
+    //    pinch state, no stuck drag).
+    var pinchStart = view.scale;
+    fire('pointerdown', vp, 560, 400, { pointerId: 1 });
+    fire('pointerdown', vp, 640, 400, { pointerId: 2 });
+    fire('pointermove', vp, 400, 400, { pointerId: 1 });
+    fire('pointermove', vp, 800, 400, { pointerId: 2 }); // dist 80 -> 320 = x4
+    var pinchScale = view.scale;
+    var pinchZoomOk = pinchScale > pinchStart + 0.2 && pinchScale <= 2.5 + 1e-9;
+    var yBeforePan = view.y;
+    fire('pointermove', vp, 400, 500, { pointerId: 1 });
+    fire('pointermove', vp, 800, 500, { pointerId: 2 }); // midpoint +100px y
+    var pinchPanDy = view.y - yBeforePan;
+    fire('pointerup', vp, 400, 500, { pointerId: 1 });
+    fire('pointerup', vp, 800, 500, { pointerId: 2 });
+    var yBeforeSingle = view.y;
+    fire('pointerdown', vp, 640, 400);
+    fire('pointermove', vp, 640, 300);
+    fire('pointerup', vp, 640, 300);
+    var pinch = {
+      ok: pinchZoomOk && Math.abs(pinchPanDy - 100) < 1 &&
+        Math.abs(view.y - yBeforeSingle + 100) < 1,
+      zoomFrom: pinchStart, zoomTo: pinchScale, panDy: pinchPanDy
+    };
+
+    return { pan: pan, zoom: zoom, drag: drag, clamp: clamp, pinch: pinch,
+      ok: pan.ok && zoom.ok && drag.ok && clamp.ok && pinch.ok };
   };
 
   // ---- guidance check hook -----------------------------------------------------

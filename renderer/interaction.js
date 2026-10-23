@@ -19,8 +19,15 @@
  *   make the board feel like a solid slab; letting the forces do the work is
  *   the "拖动的时候其他一起漂浮" behaviour.
  *
- * Not implemented: pinch-zoom, shift axis lock, alt-duplicate, auto-pan near
- * edges (Obsidian behaviors noted in the RE report for later phases).
+ * Touch (the web build): one finger behaves exactly like a mouse — drag a
+ * card, drag empty space to pan. TWO fingers pinch-zoom (anchored at the
+ * pinch midpoint) and pan together; the moment a second finger lands, any
+ * single-finger card/pan drag is abandoned so the gesture never fights
+ * itself. Single-pointer behaviour is untouched, which is what keeps the
+ * synthetic-pointer smoke checks meaningful.
+ *
+ * Not implemented: shift axis lock, alt-duplicate, auto-pan near edges
+ * (Obsidian behaviors noted in the RE report for later phases).
  */
 (function () {
   'use strict';
@@ -42,6 +49,10 @@
 
     var cardDrag = null; // { card, el, grab: {x, y} }
     var panDrag = null;  // { startX, startY, viewX, viewY }
+    // Active pointers, keyed by pointerId. One entry = a mouse drag or a
+    // single-finger touch; two entries = a pinch (zoom + pan).
+    var pointers = new Map();
+    var pinch = null; // { dist, scale, midX, midY } captured at 2-finger start
 
     function screenToWorld(clientX, clientY) {
       var rect = viewport.getBoundingClientRect();
@@ -51,14 +62,58 @@
       };
     }
 
+    function clampScale(s) {
+      return Math.min(Math.max(s, SCALE_MIN), SCALE_MAX);
+    }
+
+    function pointerList() {
+      // Map.values() is an ITERATOR, not array-like: slice.call would see no
+      // length and silently return []. Array.from is the correct spread.
+      return Array.from(pointers.values());
+    }
+
+    // A second finger landed: drop whatever the first finger was doing so the
+    // pinch never fights a card drag or a pan.
+    function cancelSingleDrag() {
+      if (cardDrag) {
+        var c = cardDrag.card;
+        c.dragging = false;
+        c.vx = 0;
+        c.vy = 0;
+        cardDrag.el.classList.remove('dragging');
+        onCardPlaced(c); // the card stays where it was dragged to
+        cardDrag = null;
+      }
+      if (panDrag) {
+        viewport.classList.remove('panning');
+        panDrag = null;
+      }
+    }
+
     viewport.addEventListener('pointerdown', function (e) {
-      if (e.button !== 0) return; // primary button only
+      // Mouse: primary button only. Touch/pen always report button 0.
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
       // Cards in edit mode own their pointer: text selection, not dragging.
       // The hover toolbar's buttons must also decline to drag/pan — they
       // have their own click handler.
       if (e.target.closest && e.target.closest('.card.editing, .card-toolbar')) return;
       onUserInteract(); // user takes over the camera
       try { viewport.setPointerCapture(e.pointerId); } catch (err) { /* synthetic pointer */ }
+      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pointers.size === 2) {
+        // Enter pinch: two-finger zoom anchored at the midpoint, plus
+        // two-finger pan (midpoint delta below).
+        cancelSingleDrag();
+        var pts = pointerList();
+        pinch = {
+          dist: Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y) || 1,
+          scale: view.scale,
+          midX: (pts[0].x + pts[1].x) / 2,
+          midY: (pts[0].y + pts[1].y) / 2
+        };
+        return;
+      }
+      if (pointers.size > 2) return; // ignore a third finger
       var cardEl = e.target.closest ? e.target.closest('.card') : null;
       if (cardEl) {
         var card = findCard(cardEl.dataset.id);
@@ -88,6 +143,27 @@
     });
 
     viewport.addEventListener('pointermove', function (e) {
+      if (!pointers.has(e.pointerId)) return; // hover or a pointer we never saw down
+      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pinch && pointers.size >= 2) {
+        // Pinch: scale by the distance ratio (anchored at the midpoint) and
+        // pan by how far the midpoint itself travelled.
+        var pts = pointerList();
+        var d = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y) || 1;
+        var newScale = clampScale(pinch.scale * (d / pinch.dist));
+        var mx = (pts[0].x + pts[1].x) / 2, my = (pts[0].y + pts[1].y) / 2;
+        view.x += mx - pinch.midX;
+        view.y += my - pinch.midY;
+        pinch.midX = mx;
+        pinch.midY = my;
+        var rect = viewport.getBoundingClientRect();
+        var r = newScale / view.scale;
+        view.scale = newScale;
+        view.x = view.x * r + (mx - rect.left) * (1 - r);
+        view.y = view.y * r + (my - rect.top) * (1 - r);
+        applyView();
+        return;
+      }
       if (cardDrag) {
         var w = screenToWorld(e.clientX, e.clientY);
         // The grabbed card tracks the pointer exactly; everything else is
@@ -102,7 +178,10 @@
       }
     });
 
-    function endPointer() {
+    function endPointer(e) {
+      pointers.delete(e.pointerId);
+      if (pointers.size < 2) pinch = null;
+      if (pointers.size >= 1) return; // a finger is still down: keep it simple
       if (cardDrag) {
         var card = cardDrag.card;
         card.dragging = false;
