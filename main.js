@@ -32,6 +32,10 @@ const VAULT_DIR = process.env.CARDWALL_VAULT_DIR
 const BOARDS_DIR = path.join(VAULT_DIR, 'boards');
 // 0.3 stored a single board here; it is imported once on first launch.
 const LEGACY_BOARD_FILE = path.join(VAULT_DIR, 'board.json');
+// Where the desktop build left off: the last-edited board and the camera
+// (pan/zoom) it was viewed at, so relaunching drops you straight back in.
+// The web edition has no session file at all (it remembers nothing).
+const SESSION_FILE = path.join(VAULT_DIR, 'session.json');
 // The packaged app's __dirname lives inside a read-only asar, so the smoke
 // screenshot goes to the temp dir there; in dev it lands next to main.js.
 const SMOKE_SHOT = app.isPackaged
@@ -208,6 +212,61 @@ function listBoards() {
 
 ipcMain.handle('boards:list', () => listBoards());
 
+// ---- session (last edited board + camera) ----------------------------------
+// A tiny, untrusted-input-safe record: { lastBoardId, view: { x, y, scale } }.
+// Anything malformed degrades to null (fresh launch shows the library), never
+// to a crash or a garbage camera.
+const MIN_SCALE = 0.1;
+const MAX_SCALE = 4;
+
+function sanitizeSession(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const id = safeId(raw.lastBoardId);
+  if (!id) return null;
+  const v = raw.view;
+  if (!v || typeof v !== 'object') return { lastBoardId: id, view: null };
+  const x = Number(v.x), y = Number(v.y), scale = Number(v.scale);
+  if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(scale)) {
+    return { lastBoardId: id, view: null };
+  }
+  return {
+    lastBoardId: id,
+    view: {
+      x: x,
+      y: y,
+      scale: Math.min(Math.max(scale, MIN_SCALE), MAX_SCALE)
+    }
+  };
+}
+
+function readSession() {
+  try {
+    return sanitizeSession(JSON.parse(fs.readFileSync(SESSION_FILE, 'utf8')));
+  } catch (err) {
+    if (err.code !== 'ENOENT') console.error('[session] read failed:', err.message);
+    return null;
+  }
+}
+
+function writeSession(session) {
+  const clean = sanitizeSession(session);
+  if (!clean) return { ok: false, error: 'invalid session' };
+  try {
+    fs.mkdirSync(VAULT_DIR, { recursive: true });
+    const tmp = SESSION_FILE + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(clean, null, 2), 'utf8');
+    fs.renameSync(tmp, SESSION_FILE);
+    return { ok: true };
+  } catch (err) {
+    console.error('[session] write failed:', err.message);
+    return { ok: false, error: String(err && err.message || err) };
+  }
+}
+
+ipcMain.handle('session:load', () => readSession());
+
+ipcMain.handle('session:save', (event, session) => writeSession(session));
+
 ipcMain.handle('boards:create', (event, name) => {
   const id = newBoardId();
   const clean = cleanName(name);
@@ -218,7 +277,15 @@ ipcMain.handle('boards:create', (event, name) => {
 ipcMain.handle('boards:open', (event, id) => {
   const board = readBoardFile(id);
   if (!board) return null;
-  return { id: safeId(id), name: cleanName(board.name), cards: sanitizeBoard(board).cards };
+  const clean = sanitizeBoard(board);
+  return {
+    id: safeId(id),
+    name: cleanName(board.name),
+    cards: clean.cards,
+    // undefined for boards saved before the flag existed: openBoardInto
+    // then defaults to the tidy tree, so old archives behave as before.
+    tidy: clean.tidy
+  };
 });
 
 ipcMain.handle('boards:save', (event, id, data) => {
@@ -229,12 +296,15 @@ ipcMain.handle('boards:save', (event, id, data) => {
   // stale renderer must not be able to wipe it.
   const previous = readBoardFile(safe);
   const name = cleanName(previous ? previous.name : (data && data.name));
-  writeBoardFile(safe, {
+  const board = {
     version: 1,
     name: name,
     savedAt: new Date().toISOString(),
     cards: clean.cards
-  });
+  };
+  // A board left in free placement reopens free; one left tidy reopens tidy.
+  if (clean.tidy !== undefined) board.tidy = clean.tidy;
+  writeBoardFile(safe, board);
   return { ok: true, path: boardPath(safe), cards: clean.cards.length, name: name };
 });
 
@@ -393,6 +463,20 @@ function createWindow() {
           console.log('[smoke] home screenshot ->', homeShotPath, 'ink', shotHome.ink.toFixed(3));
         }
         await win.webContents.executeJavaScript('document.getElementById("home-btn").click()');
+        // home-check deleted its board through the RAW bridge, bypassing the
+        // app's own deleteBoardById — so the renderer's current board is now a
+        // dangling id and the session points at it. Drive the app back onto a
+        // live board exactly like a user would: open the library (which
+        // re-renders the list from disk) and click the first card. That path
+        // reopens the board AND force-flushes the session at it, so the
+        // reload below deterministically exercises the SESSION restore path
+        // instead of silently falling back to "most recent board".
+        await win.webContents.executeJavaScript('document.getElementById("home-top-btn").click()');
+        await new Promise((r) => setTimeout(r, 150)); // let renderHome() finish
+        await win.webContents.executeJavaScript(
+          'var c = document.querySelector("#board-list .home-card"); if (c) c.click();'
+        );
+        await new Promise((r) => setTimeout(r, 300)); // openBoardById + session flush
         // Load path: reload the window and confirm the board comes back from disk.
         win.webContents.reload();
         let ready2 = false;
@@ -407,12 +491,35 @@ function createWindow() {
         }
         const loaded = ready2
           ? await win.webContents.executeJavaScript(
-              '({ cards: window.__cardwall.world.cards.length, hasEdited: window.__cardwall.world.cards.some(function (c) { return c.title === "已编辑标题"; }) })'
+              '({ cards: window.__cardwall.world.cards.length, hasEdited: window.__cardwall.world.cards.some(function (c) { return c.title === "已编辑标题"; }), boot: window.__cardwallBootInfo() })'
             )
           : null;
         const okLoad = !!loaded && loaded.cards === 5 && loaded.hasEdited;
         console.log('[smoke] load-check:', JSON.stringify(loaded), okLoad ? 'PASS' : 'FAIL');
         if (!okLoad) { app.exit(1); return; }
+        // The reload must have come back through the SESSION restore path,
+        // not the "most recent board" fallback — otherwise the session file
+        // silently points at a deleted board and this check proves nothing.
+        if (!loaded.boot || !loaded.boot.restored) {
+          console.error('[smoke] FAIL load-check did not restore from session:', JSON.stringify(loaded.boot));
+          app.exit(1);
+          return;
+        }
+        // The restored camera must match the session on disk: pan/zoom are
+        // applied verbatim (no boot fit, no settle re-frame).
+        let sessionOnDisk = null;
+        try {
+          sessionOnDisk = JSON.parse(fs.readFileSync(path.join(VAULT_DIR, 'session.json'), 'utf8'));
+        } catch (err) { /* checked below */ }
+        const viewNow = await win.webContents.executeJavaScript(
+          '({ x: window.__cardwall.view.x, y: window.__cardwall.view.y, scale: window.__cardwall.view.scale })'
+        );
+        const sv = sessionOnDisk && sessionOnDisk.view;
+        const cameraRestored = !!sv &&
+          Math.abs(sv.x - viewNow.x) < 1 && Math.abs(sv.y - viewNow.y) < 1 &&
+          Math.abs(sv.scale - viewNow.scale) < 0.01;
+        console.log('[smoke] camera-restore-check:', JSON.stringify({ session: sv, now: viewNow }), cameraRestored ? 'PASS' : 'FAIL');
+        if (!cameraRestored) { app.exit(1); return; }
         app.exit(0);
       } catch (err) {
         console.error('[smoke] error:', err);

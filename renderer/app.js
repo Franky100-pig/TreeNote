@@ -229,6 +229,49 @@
     return saveState.pending;
   }
 
+  // ---- session (desktop only: last edited board + camera) -------------------
+  // The downloaded app remembers where you left off — which board was open and
+  // the pan/zoom it was viewed at — so relaunching drops you straight back in
+  // instead of the library. The web bridge exposes no session API at all (the
+  // browser keeps nothing), so every helper here feature-detects and no-ops.
+  var sessionState = { dirty: false, lastChange: 0 };
+
+  function hasSession() {
+    return !!(window.cardwall && typeof window.cardwall.saveSession === 'function');
+  }
+
+  function markSessionDirty() {
+    if (!hasSession()) return;
+    sessionState.dirty = true;
+    sessionState.lastChange = performance.now();
+  }
+
+  function flushSession(force) {
+    if (!hasSession() || !currentBoard.id || !sessionState.dirty) {
+      return Promise.resolve(null);
+    }
+    if (!force && performance.now() - sessionState.lastChange < SAVE_DEBOUNCE_MS) {
+      return Promise.resolve(null);
+    }
+    sessionState.dirty = false;
+    return window.cardwall.saveSession({
+      lastBoardId: currentBoard.id,
+      view: { x: view.x, y: view.y, scale: view.scale }
+    }).then(function (r) {
+      return r;
+    }, function (err) {
+      sessionState.dirty = true; // retry on the next flush
+      return { ok: false, error: String(err) };
+    });
+  }
+
+  // Best-effort final flush: an in-flight IPC may not complete during
+  // teardown, but the 600ms debounce has normally persisted long before.
+  window.addEventListener('pagehide', function () {
+    markSessionDirty();
+    flushSession(true);
+  });
+
   // ---- view transform --------------------------------------------------------
   // Pan/zoom plumbing; input handlers live in interaction.js. Zoom anchor math
   // (verified by fixed-point check): pan' = pan*r + anchor*(1 - r),
@@ -286,6 +329,7 @@
         Math.abs(tween.scale - view.scale) < 0.001) {
       view.x = tween.x; view.y = tween.y; view.scale = tween.scale;
       tween = null;
+      markSessionDirty(); // persist the settled camera once, not every frame
     }
     applyView();
   }
@@ -293,6 +337,7 @@
   function onUserInteract() {
     userInteracted = true;
     tween = null; // never fight the user for the camera
+    markSessionDirty(); // the camera is part of "where you left off"
   }
 
   // ---- main loop: fixed-step accumulator --------------------------------------
@@ -331,6 +376,7 @@
     stepTween(dtS);
     syncDOM();
     flushSave(false);
+    flushSession(false);
   }
 
   function frame(now) {
@@ -346,6 +392,10 @@
   // used board is opened. A first launch creates one board seeded with the
   // sample tree, so there is always something to look at.
   var loopStarted = false;
+  // Diagnostic for the smoke load-check: which path boot actually took
+  // (session restore vs. the "most recent board" fallback).
+  var bootInfo = { restored: false, sessionBoardId: null, openedBoardId: null };
+  window.__cardwallBootInfo = function () { return bootInfo; };
 
   function clearWorld() {
     world.cards.length = 0;
@@ -368,7 +418,11 @@
     world.time = 0;
   }
 
-  function openBoardInto(board) {
+  function isRestorableView(v) {
+    return !!v && isFinite(v.x) && isFinite(v.y) && isFinite(v.scale) && v.scale > 0;
+  }
+
+  function openBoardInto(board, restoreView) {
     clearWorld();
     if (board && Array.isArray(board.cards)) seedCards(board.cards);
     // A brand-new board (or a genuinely empty one) starts with ONE blank,
@@ -391,7 +445,18 @@
     world.tidy = !board || board.tidy === undefined ? true : !!board.tidy;
     buildDOM();
     world.cards.forEach(measure);
-    applyFit(90);
+    // A restored camera (desktop session) is applied verbatim: the user put
+    // the board exactly there, so neither the boot fit nor the settle re-frame
+    // may move it. Everything else — new board, web edition — gets the fit.
+    if (isRestorableView(restoreView)) {
+      view.x = restoreView.x;
+      view.y = restoreView.y;
+      view.scale = Math.min(Math.max(restoreView.scale, 0.1), 4);
+      applyView();
+      settleFitDone = true;
+    } else {
+      applyFit(90);
+    }
     syncDOM();
     currentBoard = { id: board.id, name: board.name || '未命名' };
     boardNameEl.textContent = currentBoard.name;
@@ -401,6 +466,7 @@
       loopStarted = true;
       requestAnimationFrame(frame);
     }
+    markSessionDirty(); // this board + this camera is now "where you left off"
   }
 
   function boot() {
@@ -411,22 +477,46 @@
       window.__cardwallReady = true;
       return;
     }
-    bridge.listBoards().then(function (list) {
-      if (list && list.length) return bridge.openBoard(list[0].id);
-      // First run: one named board, seeded so the canvas is not empty.
-      return bridge.createBoard('我的第一幅图').then(function (created) {
-        return bridge.saveBoard(created.id, { cards: window.SAMPLE_TREE }).then(function () {
-          return { id: created.id, name: created.name, cards: window.SAMPLE_TREE };
+    // Desktop: relaunching drops straight back into the last-edited board,
+    // at the same pan/zoom. A session whose board was deleted since degrades
+    // to the normal "most recent board" path below.
+    var restore = (typeof bridge.loadSession === 'function')
+      ? Promise.resolve(bridge.loadSession()).then(function (session) {
+          bootInfo.sessionBoardId = session && session.lastBoardId ? session.lastBoardId : null;
+          if (!session || !session.lastBoardId) return null;
+          return bridge.openBoard(session.lastBoardId).then(function (board) {
+            return board ? { board: board, view: session.view || null } : null;
+          });
+        }).catch(function () { return null; })
+      : Promise.resolve(null);
+    restore.then(function (restored) {
+      bootInfo.restored = !!restored;
+      if (restored) {
+        openBoardInto(restored.board, restored.view);
+        renderHome();
+        bootInfo.openedBoardId = currentBoard.id;
+        window.__cardwallReady = true;
+        return;
+      }
+      return bridge.listBoards().then(function (list) {
+        if (list && list.length) return bridge.openBoard(list[0].id);
+        // First run: one named board, seeded so the canvas is not empty.
+        return bridge.createBoard('我的第一幅图').then(function (created) {
+          return bridge.saveBoard(created.id, { cards: window.SAMPLE_TREE }).then(function () {
+            return { id: created.id, name: created.name, cards: window.SAMPLE_TREE };
+          });
         });
+      }).then(function (board) {
+        if (!board) throw new Error('no board');
+        openBoardInto(board);
+        renderHome();
+        bootInfo.openedBoardId = currentBoard.id;
+        window.__cardwallReady = true;
       });
-    }).then(function (board) {
-      if (!board) throw new Error('no board');
-      openBoardInto(board);
-      renderHome();
-      window.__cardwallReady = true;
     }).catch(function (err) {
       console.error('[cardwall] boot failed:', err);
       openBoardInto({ id: null, name: '示例', cards: window.SAMPLE_TREE });
+      bootInfo.openedBoardId = currentBoard.id;
       window.__cardwallReady = true;
     });
   }
@@ -527,6 +617,7 @@
     return window.cardwall.openBoard(id).then(function (board) {
       if (!board) return null;
       openBoardInto(board);
+      flushSession(true); // the session now points at the board just opened
       return board;
     });
   }
@@ -537,6 +628,7 @@
       if (!created) return null;
       return window.cardwall.openBoard(created.id).then(function (board) {
         openBoardInto(board || { id: created.id, name: created.name, cards: [] });
+        flushSession(true);
         renderHome();
         return created;
       });
@@ -1116,9 +1208,14 @@
   });
 
   // Force a save and return its promise (smoke uses this for the disk check).
+  // The session is force-flushed alongside, so a reload right after this
+  // (smoke's load-check) deterministically finds the board on disk.
   window.__cardwallSaveNow = function () {
     markDirty();
-    return flushSave(true);
+    markSessionDirty();
+    return flushSave(true).then(function (r) {
+      return flushSession(true).then(function () { return r; });
+    });
   };
 
   // Theme round trip through the real key handler, so smoke exercises the

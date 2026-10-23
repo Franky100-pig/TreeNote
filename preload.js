@@ -9,5 +9,9 @@ contextBridge.exposeInMainWorld('cardwall', {
   openBoard: (id) => ipcRenderer.invoke('boards:open', id),
   saveBoard: (id, board) => ipcRenderer.invoke('boards:save', id, board),
   renameBoard: (id, name) => ipcRenderer.invoke('boards:rename', id, name),
-  deleteBoard: (id) => ipcRenderer.invoke('boards:delete', id)
+  deleteBoard: (id) => ipcRenderer.invoke('boards:delete', id),
+  // Desktop only: the web bridge exposes neither, and the renderer skips the
+  // whole restore path when they are absent.
+  loadSession: () => ipcRenderer.invoke('session:load'),
+  saveSession: (session) => ipcRenderer.invoke('session:save', session)
 });
