@@ -20,18 +20,23 @@
 
 ## 下载
 
-[GitHub Releases](https://github.com/Franky100-pig/TreeNote/releases/latest) 提供 macOS（arm64）dmg。未做代码签名，首次启动需**右键 → 打开**，或执行 `xattr -dr com.apple.quarantine /Applications/cardwall.app`。
+[GitHub Releases](https://github.com/Franky100-pig/TreeNote/releases/latest) 提供：
+
+- **macOS**（arm64）dmg——未做代码签名，首次启动需**右键 → 打开**，或执行 `xattr -dr com.apple.quarantine /Applications/cardwall.app`
+- **Windows**（x64）安装包（`.exe`，辅助安装、免管理员权限）+ 免安装 `.zip`
+
+桌面版会**记住你上次编辑的那幅图和当时的视角**（平移/缩放），重开 app 直接回到原处；图与相机都存在本机（macOS 在 `~/Library/Application Support/cardwall/vault/`，Windows 在 `%APPDATA%\cardwall\vault\`），卸载不会动它们。
 
 ## 网页版 & 手机
 
-**不想装 app？直接用浏览器：<https://franky100-pig.github.io/TreeNote/>**
+**不想装 app？先用浏览器试试：<https://franky100-pig.github.io/TreeNote/>**
 
-同一个 app、同一份渲染代码：桌面版走 Electron + 本地文件库，网页版在浏览器里用 localStorage 存图（换设备/清缓存会丢，桌面版才是持久库）。手机上专门做了适配：
+同一个 app、同一份渲染代码：**网页版什么都不记住**——刷新或关掉标签页，新建的图、卡片、视角全部消失（数据只活在当前这个标签页的内存里，不上传、不写 localStorage）。要留住，就下载桌面版。手机上专门做了适配：
 
 - **单指** = 鼠标：拖卡片、拖空白平移、点一下选中并浮出操作条
 - **双指捏合** = 缩放（以双指中点为锚）；**双指拖动** = 平移
 - 界面不再触发页面滚动/回弹/双击放大；Guidance 在手机上变成**底部抽屉**，库是单列
-- 数据只存在这台设备的浏览器里；想跨设备请用桌面版
+- 每次打开网页版都会得到一幅示例图，随便改，改完即忘
 
 手机上的效果（Guidance 变成底部抽屉，库为单列）：
 
@@ -53,7 +58,7 @@
 | **自由拖动** | 任意节点拖到哪就停哪——**松手不回弹**，整面进入自由摆放；拖动时它和子节点跟手，其余节点保持原位 |
 | 平移 / 缩放 | 拖动空白处 / 滚轮（以光标为锚点，0.2–2.5）；**触屏：双指捏合缩放、双指拖动平移** |
 | 调试叠加 | `F3` 或 `Cmd+Shift+D`：fps、卡数、仿真时间、scale、峰值速度、机械能、树目标、速度矢量 |
-| 切换主题 | `Cmd/Ctrl+Shift+L`：黑色画布 ⇄ 纸感浅色，偏好会被记住 |
+| 切换主题 | `Cmd/Ctrl+Shift+L`：黑色画布 ⇄ 纸感浅色，偏好会被记住（仅桌面版；网页版刷新即忘） |
 
 「使用指南」面板浮在画布上方，背景虚化并锁定：
 
@@ -125,10 +130,11 @@ v0.7 起顶栏做了减法：只留「一键整洁」「返回首页」和右上
 ```bash
 npm install
 npm start          # 正常启动
-npm test           # 单测：物理引擎 14 项 + web 存储垫片 9 项
-npm run smoke      # 十一层自检：渲染 / 相机 / 调试 / 主题 / 交互 / 编辑 / 操作条 / 使用指南 / 存盘 / 首页 / 读盘
+npm test           # 单测：物理引擎 14 项 + web 存储垫片 11 项
+npm run smoke      # 十二层自检：渲染 / 相机 / 调试 / 主题 / 交互 / 编辑 / 操作条 / 使用指南 / 存盘 / 首页 / 读盘 / 相机恢复
 npm run dist       # 打包 macOS dmg → dist/cardwall-<version>-arm64.dmg
-npm run build:web  # 生成网页版到 web/（同一份渲染代码 + localStorage 垫片）
+npm run dist:win   # 打包 Windows 安装包 + zip（nsis；本机无 wine 时走 CI）
+npm run build:web  # 生成网页版到 web/（同一份渲染代码 + 纯内存垫片）
 ```
 
 网页版部署（GitHub Pages，`web/` 即整站，无构建依赖）：
@@ -151,19 +157,21 @@ npm run dist
 ### 结构
 
 ```
-main.js                 Electron 主进程：窗口、图库 IPC、vault 原子写、十一层 smoke 断言
-preload.js              contextBridge：listBoards / createBoard / openBoard / saveBoard / renameBoard / deleteBoard
-renderer/web-bridge.js  网页版存储垫片：localStorage 实现同一套 window.cardwall API（Electron 下自动让位）
+main.js                 Electron 主进程：窗口、图库 IPC、vault 原子写、session.json、十二层 smoke 断言
+preload.js              contextBridge：listBoards / createBoard / openBoard / saveBoard / renameBoard / deleteBoard / loadSession / saveSession
+renderer/web-bridge.js  网页版存储垫片：纯内存实现同一套 window.cardwall API（Electron 下自动让位；刷新即忘，不碰任何存储后端）
 scripts/build-web.sh    生成网页版到 web/（复制 index.html / styles.css / renderer，注入 favicon）
+.github/workflows/windows.yml  Windows 安装包 CI：workflow_dispatch 指定 tag → nsis + zip → 上传到 release
 index.html styles.css    外壳、主题 token、卡片 / 边 / 调试面板样式
-renderer/theme-boot.js  首帧应用已保存的主题（避免浅色闪黑）
+renderer/theme-boot.js  首帧应用已保存的主题（避免浅色闪黑；网页版跳过，因为网页版不记主题）
 renderer/physics.js     整齐树布局 + 临界阻尼弹簧积分器（UMD，Node 单测 + 浏览器共用）
-renderer/app.js         世界容器、边几何、固定步长循环、相机、编辑、持久化接线
-renderer/interaction.js 平移 / 锚点缩放 / 拖拽 / 改挂
+renderer/app.js         世界容器、边几何、固定步长循环、相机、编辑、持久化接线、桌面版会话恢复
+renderer/interaction.js 平移 / 锚点缩放 / 拖拽 / 改挂 / 双指捏合
 renderer/debug.js       F3 叠加
 renderer/sample.js      首次启动的示例树
-build/icon.svg          图标源文件；build/icon.icns 由它栅格化生成
+build/icon.svg          图标源文件；build/icon.icns / build/icon.ico 由它栅格化生成
 test/physics.test.mjs   14 项单测
+test/web-bridge.test.mjs 11 项单测（含「刷新即忘 / 不碰存储后端」契约）
 ```
 
 主题全走 `styles.css` 顶部的语义 token（`--bg` / `--surface` / `--ink` / `--edge` …），一套 token 定义就是一种主题：`:root` 是默认深色（纯黑画布），`[data-theme="light"]` 覆盖同一组 token 得到纸感浅色。想加第三套主题，复制一份 token 块 + 在 `applyTheme` 里多认一个名字即可，不用碰任何组件样式。

@@ -734,6 +734,10 @@
     if (homeVisible()) showHome(false);
     else showHome(true);
   });
+  // The web edition keeps nothing across reloads; say so in the Guidance
+  // panel (desktop users never see this line).
+  var webNote = document.getElementById('web-note');
+  if (webNote && isWebPlatform) webNote.hidden = false;
   // The top bar's quick "返回首页" (next to 一键整洁): always opens the library.
   // The library's own "← 返回当前图" button takes you back to the board.
   var homeTopBtn = document.getElementById('home-top-btn');
