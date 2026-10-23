@@ -12,6 +12,11 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'">
   <title>cardwall</title>
+  <!-- web-bridge runs BEFORE theme-boot so the first-paint theme logic can
+       tell the platforms apart: under Electron the preload already installed
+       window.cardwall; in the browser this shim installs it. The web edition
+       keeps nothing (not even the theme), so theme-boot must know. -->
+  <script src="renderer/web-bridge.js"></script>
   <script src="renderer/theme-boot.js"></script>
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="styles.css">
@@ -59,6 +64,8 @@
               <li><b>⌘⇧L</b>：切换深色 / 纸感浅色主题</li>
               <li><b>H</b>：返回首页 / 打开图库</li>
             </ul>
+            <!-- Web-only note: the browser keeps nothing across reloads. -->
+            <p id="web-note" class="guide-note" hidden>网页版不保存任何内容：刷新或关掉标签页即全部忘记。下载桌面版才会记住你上次编辑的那幅图和视角。</p>
           </div>
           <div class="guidance-actions">
             <button id="home-btn" type="button">返回首页</button>
@@ -102,7 +109,6 @@
   </div>
   <script src="renderer/physics.js"></script>
   <script src="renderer/sample.js"></script>
-  <script src="renderer/web-bridge.js"></script>
   <script src="renderer/interaction.js"></script>
   <script src="renderer/debug.js"></script>
   <script src="renderer/app.js"></script>
