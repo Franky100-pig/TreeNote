@@ -559,9 +559,12 @@
   }
 
   function deleteBoardById(id) {
+    var isWeb = !!(window.cardwall && window.cardwall.platform === 'web');
     return confirmDialog({
       title: '删除这幅图？',
-      body: '文件会进废纸篓，可以从 Finder 里恢复。'
+      body: isWeb
+        ? '网页版没有废纸篓，删除后无法恢复。'
+        : '文件会进废纸篓，可以从 Finder 里恢复。'
     }).then(function (yes) {
       if (!yes) return null;
       return window.cardwall.deleteBoard(id).then(function (r) {
@@ -684,6 +687,17 @@
   if (guidanceNew) guidanceNew.addEventListener('click', function () { closeGuidance(); newBoardBtn.click(); });
   var guidanceTheme = document.getElementById('guidance-theme');
   if (guidanceTheme) guidanceTheme.addEventListener('click', function () { toggleTheme(); });
+
+  // Web (touch) build: the guide list is written for a mouse, so append the
+  // gestures that only exist on a touchscreen.
+  if (window.cardwall && window.cardwall.platform === 'web') {
+    var guideList = document.querySelector('.guide-list');
+    if (guideList) {
+      var touchLi = document.createElement('li');
+      touchLi.innerHTML = '<b>双指捏合</b>：缩放；<b>双指拖动</b>：平移；<b>点一下卡片</b>：选中并浮出操作条';
+      guideList.appendChild(touchLi);
+    }
+  }
 
   // ---- card editing (C5): selection, inline edit, create, delete ------------
   var selectedId = null;

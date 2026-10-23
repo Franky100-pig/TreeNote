@@ -6,7 +6,7 @@
   "scripts": {
     "start": "electron .",
     "smoke": "electron . --smoke",
-    "test": "node --test test/physics.test.mjs",
+    "test": "node --test \"test/**/*.test.mjs\"",
     "dist": "electron-builder --mac dmg"
   },
   "license": "MIT",
