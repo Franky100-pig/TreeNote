@@ -6,17 +6,26 @@
  * (this shim). Under Electron the preload already installed the bridge, and
  * this file installs nothing: desktop behaviour is byte-for-byte unchanged.
  *
- * Storage layout (localStorage, one key per board so a corrupt board can
- * never take the library down):
- *   cardwall.web.boards      -> JSON [{ id, name, savedAt }]
- *   cardwall.web.board.<id>  -> JSON { version, name, savedAt, cards }
+ * THE WEB EDITION REMEMBERS NOTHING. Boards live in a plain in-memory map:
+ * a reload (or closing the tab) forgets every board, every card and every
+ * camera position. The web build is a sandbox — "does it feel right?" —
+ * while the downloaded desktop app is the one that persists. This is a
+ * deliberate product split, not a limitation: there is no localStorage,
+ * no IndexedDB, no cookie anywhere in this file, so a visitor's data never
+ * leaves the tab it was created in.
  *
  * The API mirrors main.js exactly, including its sanitisation and the
  * "save keeps the name already on disk" rule, so a board saved in the
- * browser and the same board saved on the desktop deserialise identically.
+ * browser and the same board saved on the desktop deserialise identically
+ * (within a session; nothing survives a reload).
+ *
+ * Note what is deliberately ABSENT: loadSession/saveSession. The desktop
+ * bridge has them (it persists the last-edited board + camera); the web
+ * bridge does not, and app.js feature-detects their absence to skip the
+ * restore path entirely.
  *
  * UMD-ish: the browser auto-installs on load; node tests require() the
- * factory and call install() against a stub window + storage.
+ * factory and call install() against a stub window.
  */
 (function (root, factory) {
   var api = factory();
@@ -34,8 +43,6 @@
   var MAX_NOTE = 20000;
   var MAX_NAME = 80;
   var DEFAULT_NAME = '我的第一幅图';
-  var INDEX_KEY = 'cardwall.web.boards';
-  var BOARD_PREFIX = 'cardwall.web.board.';
 
   function cleanName(name) {
     var s = String(name == null ? '' : name)
@@ -55,6 +62,7 @@
   }
 
   // Mirrors main.js sanitizeBoard: untrusted JSON must never crash the app.
+  // `tidy` rides along when present (a board saved while free reopens free).
   function sanitizeBoard(data) {
     var raw = data && Array.isArray(data.cards) ? data.cards.slice(0, MAX_CARDS) : [];
     var ids = {};
@@ -80,45 +88,35 @@
       var parent = typeof c.parent === 'string' ? c.parent : null;
       if (parent && parent !== c.id && byId[parent]) byId[c.id].parent = parent;
     });
-    return { version: 1, cards: cards };
+    var out = { version: 1, cards: cards };
+    if (data && typeof data.tidy === 'boolean') out.tidy = data.tidy;
+    return out;
   }
 
-  // Install the bridge on `win` (defaults to the global window). `storage`
-  // defaults to win.localStorage; pass a stub in tests.
-  function install(win, storage) {
+  // Install the bridge on `win` (defaults to the global window). The store is
+  // a fresh in-memory map per install: reloading the page (which re-installs)
+  // starts from an empty library. No storage backend is touched — ever.
+  function install(win) {
     if (!win) return false;
-    var store = storage || win.localStorage;
-    if (!store) return false; // private mode / storage disabled: stay bridge-less
 
-    function readJSON(key) {
-      try { return JSON.parse(store.getItem(key)); } catch (err) { return null; }
-    }
-    function writeJSON(key, value) {
-      store.setItem(key, JSON.stringify(value));
-    }
-    function readIndex() {
-      var idx = readJSON(INDEX_KEY);
-      return Array.isArray(idx) ? idx : [];
-    }
-    function writeIndex(idx) {
-      writeJSON(INDEX_KEY, idx);
-    }
-    function readBoardFile(id) {
-      var data = readJSON(BOARD_PREFIX + safeId(id));
-      if (!data || !Array.isArray(data.cards)) return null;
-      return data;
+    var boards = {};   // id -> { version, name, savedAt, cards, tidy? }
+    var order = [];    // ids in creation order (recency derived from savedAt)
+
+    function readBoard(id) {
+      var b = boards[safeId(id)];
+      return b && Array.isArray(b.cards) ? b : null;
     }
 
     win.cardwall = {
       platform: 'web',
 
       listBoards: function () {
-        return Promise.resolve(readIndex().map(function (b) {
-          var board = readBoardFile(b.id);
+        return Promise.resolve(order.map(function (id) {
+          var b = boards[id];
           return {
-            id: b.id,
+            id: id,
             name: cleanName(b.name),
-            cards: board && Array.isArray(board.cards) ? board.cards.length : 0,
+            cards: Array.isArray(b.cards) ? b.cards.length : 0,
             savedAt: b.savedAt || null
           };
         }).filter(function (b) { return !!b.id; })
@@ -132,20 +130,20 @@
         var id = newBoardId();
         var clean = cleanName(name);
         var savedAt = new Date().toISOString();
-        writeJSON(BOARD_PREFIX + id, { version: 1, name: clean, savedAt: savedAt, cards: [] });
-        var idx = readIndex();
-        idx.push({ id: id, name: clean, savedAt: savedAt });
-        writeIndex(idx);
+        boards[id] = { version: 1, name: clean, savedAt: savedAt, cards: [] };
+        order.push(id);
         return Promise.resolve({ id: id, name: clean, cards: 0 });
       },
 
       openBoard: function (id) {
-        var board = readBoardFile(id);
+        var board = readBoard(id);
         if (!board) return Promise.resolve(null);
+        var clean = sanitizeBoard(board);
         return Promise.resolve({
           id: safeId(id),
           name: cleanName(board.name),
-          cards: sanitizeBoard(board).cards
+          cards: clean.cards,
+          tidy: clean.tidy
         });
       },
 
@@ -153,57 +151,44 @@
         var safe = safeId(id);
         if (!safe) return Promise.resolve({ ok: false, error: 'invalid id' });
         var clean = sanitizeBoard(data);
-        // Keep the name already on disk: renaming has its own call, and a
+        // Keep the name already in memory: renaming has its own call, and a
         // stale renderer must not be able to wipe it (same rule as main.js).
-        var previous = readBoardFile(safe);
+        var previous = boards[safe];
         var name = cleanName(previous ? previous.name : (data && data.name));
         var savedAt = new Date().toISOString();
-        writeJSON(BOARD_PREFIX + safe, {
-          version: 1, name: name, savedAt: savedAt, cards: clean.cards
-        });
-        var idx = readIndex();
-        var found = false;
-        for (var i = 0; i < idx.length; i++) {
-          if (idx[i].id === safe) {
-            idx[i].name = name; idx[i].savedAt = savedAt; found = true; break;
-          }
-        }
-        if (!found) idx.push({ id: safe, name: name, savedAt: savedAt });
-        writeIndex(idx);
+        var next = { version: 1, name: name, savedAt: savedAt, cards: clean.cards };
+        if (clean.tidy !== undefined) next.tidy = clean.tidy;
+        boards[safe] = next;
+        if (order.indexOf(safe) < 0) order.push(safe);
         return Promise.resolve({ ok: true, cards: clean.cards.length, name: name });
       },
 
       renameBoard: function (id, name) {
         var safe = safeId(id);
         if (!safe) return Promise.resolve({ ok: false, error: 'invalid id' });
-        var board = readBoardFile(safe);
+        var board = boards[safe];
         if (!board) return Promise.resolve({ ok: false, error: 'not found' });
         var next = cleanName(name);
-        var savedAt = new Date().toISOString();
         board.name = next;
-        board.savedAt = savedAt;
-        writeJSON(BOARD_PREFIX + safe, board);
-        var idx = readIndex();
-        for (var i = 0; i < idx.length; i++) {
-          if (idx[i].id === safe) { idx[i].name = next; idx[i].savedAt = savedAt; break; }
-        }
-        writeIndex(idx);
+        board.savedAt = new Date().toISOString();
         return Promise.resolve({ ok: true, name: next });
       },
 
       // The desktop build moves the file to the OS trash; the web build has
-      // no trash, so this is a hard delete (app.js words the confirm dialog
-      // accordingly via platform === 'web').
+      // no trash and no disk, so this drops the in-memory board (app.js
+      // words the confirm dialog accordingly via platform === 'web').
       deleteBoard: function (id) {
         var safe = safeId(id);
         if (!safe) return Promise.resolve({ ok: false, error: 'invalid id' });
-        var existed = !!readBoardFile(safe);
-        try { store.removeItem(BOARD_PREFIX + safe); } catch (err) { /* ignore */ }
-        var idx = readIndex().filter(function (b) { return b.id !== safe; });
-        writeIndex(idx);
+        var existed = !!boards[safe];
+        delete boards[safe];
+        order = order.filter(function (b) { return b !== safe; });
         if (!existed) return Promise.resolve({ ok: false, error: 'not found' });
         return Promise.resolve({ ok: true });
       }
+
+      // No loadSession/saveSession here on purpose: the web edition keeps
+      // nothing across reloads, so there is no session to restore.
     };
     return true;
   }
@@ -213,8 +198,6 @@
     sanitizeBoard: sanitizeBoard,
     cleanName: cleanName,
     safeId: safeId,
-    newBoardId: newBoardId,
-    INDEX_KEY: INDEX_KEY,
-    BOARD_PREFIX: BOARD_PREFIX
+    newBoardId: newBoardId
   };
 });

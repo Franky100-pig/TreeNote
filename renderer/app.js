@@ -1044,9 +1044,11 @@
 
   // ---- theme ---------------------------------------------------------------
   // Dark is the default. Cmd/Ctrl+Shift+L flips to the paper theme and the
-  // choice is remembered across launches (index.html applies it before the
-  // first paint so a light board does not flash black on boot).
+  // choice is remembered across launches on the DESKTOP build (index.html
+  // applies it before the first paint so a light board does not flash black
+  // on boot). The web edition remembers nothing — not even the theme.
   var THEME_KEY = 'cardwall.theme';
+  var isWebPlatform = !!(window.cardwall && window.cardwall.platform === 'web');
 
   function currentTheme() {
     return document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
@@ -1058,6 +1060,7 @@
     } else {
       delete document.documentElement.dataset.theme;
     }
+    if (isWebPlatform) return; // the browser keeps nothing
     try {
       localStorage.setItem(THEME_KEY, name);
     } catch (err) { /* storage unavailable — the theme just won't persist */ }

@@ -12,6 +12,11 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'">
   <title>cardwall</title>
+  <!-- web-bridge runs BEFORE theme-boot so the first-paint theme logic can
+       tell the platforms apart: under Electron the preload already installed
+       window.cardwall; in the browser this shim installs it. The web edition
+       keeps nothing (not even the theme), so theme-boot must know. -->
+  <script src="renderer/web-bridge.js"></script>
   <script src="renderer/theme-boot.js"></script>
   <link rel="stylesheet" href="styles.css">
 </head>
@@ -101,7 +106,6 @@
   </div>
   <script src="renderer/physics.js"></script>
   <script src="renderer/sample.js"></script>
-  <script src="renderer/web-bridge.js"></script>
   <script src="renderer/interaction.js"></script>
   <script src="renderer/debug.js"></script>
   <script src="renderer/app.js"></script>

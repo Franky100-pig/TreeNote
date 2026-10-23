@@ -1,6 +1,9 @@
 // Unit tests for the web storage bridge (renderer/web-bridge.js).
-// The bridge must behave EXACTLY like the Electron preload + main.js vault,
-// because the renderer cannot tell the two apart.
+// The bridge must behave EXACTLY like the Electron preload + main.js vault
+// (within a session), because the renderer cannot tell the two apart — with
+// one deliberate difference: THE WEB EDITION REMEMBERS NOTHING. Boards live
+// in memory only, so a reload starts from an empty library and no storage
+// backend (localStorage et al.) is ever touched.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
@@ -8,26 +11,13 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const bridge = require('../renderer/web-bridge.js');
 
-// Minimal localStorage stub (Map-backed), same shape the bridge uses.
-function makeStorage() {
-  const map = new Map();
-  return {
-    getItem: (k) => (map.has(k) ? map.get(k) : null),
-    setItem: (k, v) => { map.set(k, String(v)); },
-    removeItem: (k) => { map.delete(k); },
-    _map: map
-  };
-}
-
 function makeWorld() {
-  const storage = makeStorage();
   const win = {};
-  assert.equal(bridge.install(win, storage), true, 'installs on a fresh window');
-  return { win, storage };
+  assert.equal(bridge.install(win), true, 'installs on a fresh window');
+  return { win };
 }
 
 test('web-bridge: install is a no-op when the Electron preload already ran', () => {
-  const storage = makeStorage();
   const win = { cardwall: { platform: 'darwin', listBoards: () => Promise.resolve([]) } };
   // A pre-installed bridge must survive untouched.
   const before = win.cardwall;
@@ -37,10 +27,32 @@ test('web-bridge: install is a no-op when the Electron preload already ran', () 
   assert.ok(before && typeof before.listBoards === 'function');
 });
 
-test('web-bridge: storage disabled -> install reports failure', () => {
-  const win = {}; // no localStorage at all
-  assert.equal(bridge.install(win), false);
-  assert.equal(win.cardwall, undefined);
+test('web-bridge: no session API — the web edition has nothing to restore', () => {
+  const { win } = makeWorld();
+  assert.equal(win.cardwall.loadSession, undefined);
+  assert.equal(win.cardwall.saveSession, undefined);
+});
+
+test('web-bridge: storage backends are never touched', async () => {
+  // Any access to web storage is a bug: the bridge is memory-only. A poisoned
+  // localStorage makes even a read throw, and nothing here may throw.
+  const calls = [];
+  globalThis.localStorage = {
+    getItem: (k) => { calls.push(['get', k]); return null; },
+    setItem: (k, v) => { calls.push(['set', k, v]); },
+    removeItem: (k) => { calls.push(['remove', k]); }
+  };
+  try {
+    const { win } = makeWorld();
+    const created = await win.cardwall.createBoard('A');
+    await win.cardwall.saveBoard(created.id, { cards: [{ id: 'x', title: 't' }] });
+    await win.cardwall.listBoards();
+    await win.cardwall.renameBoard(created.id, 'B');
+    await win.cardwall.deleteBoard(created.id);
+    assert.deepEqual(calls, [], 'the bridge must not read or write web storage');
+  } finally {
+    delete globalThis.localStorage;
+  }
 });
 
 test('web-bridge: create -> list -> open round trip', async () => {
@@ -60,7 +72,7 @@ test('web-bridge: create -> list -> open round trip', async () => {
   assert.equal(await win.cardwall.openBoard('nope'), null);
 });
 
-test('web-bridge: first board is seeded with the sample tree and persists', async () => {
+test('web-bridge: save -> open round trip (in-memory)', async () => {
   const { win } = makeWorld();
   const created = await win.cardwall.createBoard('第一幅');
   await win.cardwall.saveBoard(created.id, {
@@ -76,7 +88,7 @@ test('web-bridge: first board is seeded with the sample tree and persists', asyn
   assert.equal(opened.cards[1].parent, 'r');
 });
 
-test('web-bridge: save keeps the name already on disk (stale renderer cannot wipe it)', async () => {
+test('web-bridge: save keeps the name already in memory (stale renderer cannot wipe it)', async () => {
   const { win } = makeWorld();
   const created = await win.cardwall.createBoard('原名');
   const r = await win.cardwall.saveBoard(created.id, { name: '伪造名', cards: [] });
@@ -98,8 +110,33 @@ test('web-bridge: delete removes the board and reports missing ones', async () =
   assert.equal((await win.cardwall.listBoards()).length, 2);
   assert.equal((await win.cardwall.deleteBoard(a.id)).ok, true);
   assert.equal((await win.cardwall.listBoards()).length, 1);
-  assert.equal((await win.cardwall.openBoard(a.id)), null);
+  assert.equal(await win.cardwall.openBoard(a.id), null);
   assert.deepEqual(await win.cardwall.deleteBoard(a.id), { ok: false, error: 'not found' });
+});
+
+test('web-bridge: a reload forgets everything (memory-less by design)', async () => {
+  const first = makeWorld().win;
+  const created = await first.cardwall.createBoard('A');
+  await first.cardwall.saveBoard(created.id, { cards: [{ id: 'x', title: 't' }] });
+  assert.equal((await first.cardwall.listBoards()).length, 1);
+
+  // A page reload re-runs the module against a fresh window + fresh store.
+  const reloaded = makeWorld().win;
+  assert.deepEqual(await reloaded.cardwall.listBoards(), []);
+  assert.equal(await reloaded.cardwall.openBoard(created.id), null);
+});
+
+test('web-bridge: the tidy flag survives save -> open', async () => {
+  const { win } = makeWorld();
+  const created = await win.cardwall.createBoard('A');
+  await win.cardwall.saveBoard(created.id, { tidy: false, cards: [{ id: 'x', title: 't' }] });
+  const opened = await win.cardwall.openBoard(created.id);
+  assert.equal(opened.tidy, false);
+  await win.cardwall.saveBoard(created.id, { tidy: true, cards: [{ id: 'x', title: 't' }] });
+  assert.equal((await win.cardwall.openBoard(created.id)).tidy, true);
+  // No flag -> stays undefined, and openBoardInto defaults to a tidy tree.
+  await win.cardwall.saveBoard(created.id, { cards: [{ id: 'x', title: 't' }] });
+  assert.equal((await win.cardwall.openBoard(created.id)).tidy, undefined);
 });
 
 test('web-bridge: sanitizeBoard drops junk and resolves late parents (mirrors main.js)', () => {
@@ -124,6 +161,7 @@ test('web-bridge: sanitizeBoard drops junk and resolves late parents (mirrors ma
   assert.equal(clean.cards[4].x, 0);
   assert.equal(clean.cards[4].y, 0);
   assert.equal(clean.cards[5].title.length, 500);
+  assert.equal(clean.tidy, undefined, 'no tidy flag in, none out');
 });
 
 test('web-bridge: listBoards sorts most-recently-saved first', async () => {
@@ -135,14 +173,4 @@ test('web-bridge: listBoards sorts most-recently-saved first', async () => {
   const list = await win.cardwall.listBoards();
   assert.equal(list[0].id, a.id);
   assert.equal(list[0].cards, 1);
-});
-
-test('web-bridge: corrupt board JSON does not break the library', async () => {
-  const { win, storage } = makeWorld();
-  const created = await win.cardwall.createBoard('A');
-  storage.setItem('cardwall.web.board.' + created.id, '{not json');
-  const list = await win.cardwall.listBoards();
-  assert.equal(list.length, 1);
-  assert.equal(list[0].cards, 0);
-  assert.equal(await win.cardwall.openBoard(created.id), null);
 });
