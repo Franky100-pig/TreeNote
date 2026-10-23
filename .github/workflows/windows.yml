@@ -1,0 +1,57 @@
+# Windows installer + zip for a tagged release.
+#
+# The macOS dmg is built locally (arm64, unsigned, via `npm run dist`);
+# Windows cannot be packaged from this Mac without wine, so the Windows
+# assets come from here instead. Dispatch is manual on purpose: a release
+# only ever ships Windows installers that were explicitly asked for.
+#
+#   gh workflow run windows.yml -f tag=v0.8.0
+#
+# The job builds nsis (assisted installer, per-user, no admin) + zip
+# (portable fallback), then attaches both to the release for that tag.
+name: windows
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'git tag to build (e.g. v0.8.0)'
+        required: true
+        default: 'v0.8.0'
+
+permissions:
+  contents: write # attaching assets to the release
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Unit tests (same gate as a local release)
+        run: npm ci && npm test
+
+      - name: Build installer + zip
+        # --x64 is explicit: without an arch flag electron-builder follows the
+        # runner's arch, and a stray arm64 artifact would not be what we ship.
+        run: npx electron-builder --win nsis zip --x64 --publish never
+
+      - name: Upload build artifacts (downloadable from the run)
+        uses: actions/upload-artifact@v4
+        with:
+          name: cardwall-windows-${{ inputs.tag }}
+          if-no-files-found: error
+          path: |
+            dist/cardwall-*-win-*.exe
+            dist/cardwall-*-win-*.zip
+
+      - name: Attach to the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ inputs.tag }}" dist/cardwall-*-win-*.exe dist/cardwall-*-win-*.zip --clobber

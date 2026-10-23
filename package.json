@@ -1,14 +1,15 @@
 {
   "name": "cardwall",
   "version": "0.8.0",
-  "description": "力导向整齐树卡片墙笔记工具 — 自由拖拽每个节点、松手不回弹，一键整洁回到标准树；桌面 (Electron) + 网页双版，手机可触控",
+  "description": "力导向整齐树卡片墙笔记工具 — 自由拖拽每个节点、松手不回弹，一键整洁回到标准树；桌面 (macOS/Windows Electron) + 网页双版，手机可触控",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
     "smoke": "electron . --smoke",
     "test": "node --test \"test/**/*.test.mjs\"",
     "build:web": "scripts/build-web.sh",
-    "dist": "electron-builder --mac dmg"
+    "dist": "electron-builder --mac dmg",
+    "dist:win": "electron-builder --win nsis zip"
   },
   "license": "MIT",
   "devDependencies": {
@@ -45,6 +46,32 @@
     "dmg": {
       "title": "cardwall",
       "icon": "build/icon.icns"
+    },
+    "win": {
+      "icon": "build/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "cardwall-${version}-win-${arch}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "cardwall",
+      "deleteAppDataOnUninstall": false
     }
   }
 }
