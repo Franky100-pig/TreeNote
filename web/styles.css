@@ -1,0 +1,870 @@
+/* Theme tokens: every colour the UI draws comes from here, so a theme is
+   just a different set of these values. */
+:root {
+  --bg: #000000;
+  --bg-fade: rgba(0, 0, 0, 0);
+  --ink: #e8e6e1;
+  --muted: #8d887c;
+  --surface: #16161a;
+  --surface-border: #2b2b31;
+  --root-border: #6b5c33;
+  --edge: #5a5a64;
+  --shadow: rgba(0, 0, 0, 0.55);
+  --shadow-tight: rgba(0, 0, 0, 0.35);
+  --shadow-lift: rgba(0, 0, 0, 0.70);
+  --shadow-tight-lift: rgba(0, 0, 0, 0.45);
+  --accent-soft: #7a6a3c;
+  --accent-soft-ring: rgba(201, 169, 80, 0.24);
+  --accent-strong: #b9a97a;
+  --accent-strong-ring: rgba(201, 169, 80, 0.42);
+  --placeholder: #4b463f;
+  --panel-bg: rgba(16, 16, 18, 0.94);
+  --dbg-anchor: #d8b23a;
+  --dbg-vel: #6aa9e0;
+}
+
+/* The original paper theme, kept as an opt-in (Cmd/Ctrl+Shift+L). */
+[data-theme="light"] {
+  --bg: #f7f5f0;
+  --bg-fade: rgba(247, 245, 240, 0);
+  --ink: #3d3a34;
+  --muted: #8a8577;
+  --surface: #ffffff;
+  --surface-border: #e8e4da;
+  --root-border: #d8cfae;
+  --edge: #c9c2b3;
+  --shadow: rgba(61, 58, 52, 0.08);
+  --shadow-tight: rgba(61, 58, 52, 0.05);
+  --shadow-lift: rgba(61, 58, 52, 0.10);
+  --shadow-tight-lift: rgba(61, 58, 52, 0.10);
+  --accent-soft: #c9b98a;
+  --accent-soft-ring: rgba(201, 185, 138, 0.30);
+  --accent-strong: #b9a97a;
+  --accent-strong-ring: rgba(185, 169, 122, 0.45);
+  --placeholder: #b9b2a4;
+  --panel-bg: rgba(255, 255, 255, 0.93);
+  --dbg-anchor: #c9a227;
+  --dbg-vel: #3d7fb8;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: -apple-system, "PingFang SC", "Helvetica Neue", sans-serif;
+  /* Stop iOS from inflating text in landscape / on rotate. */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+#app {
+  width: 100%;
+  height: 100%;
+  /* Mobile browser chrome shows/hides as you scroll; dvh tracks the truly
+     visible viewport so the canvas never ends up half under the URL bar. */
+  height: 100dvh;
+}
+
+/* ---- toolbar ---------------------------------------------------------- */
+#toolbar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 16px;
+  z-index: 10;
+  pointer-events: none;
+  background: linear-gradient(var(--bg) 60%, var(--bg-fade));
+}
+
+#toolbar .brand {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+
+#toolbar .hint {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* ---- viewport & world container --------------------------------------- */
+#viewport {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+  /* The canvas owns every gesture: no page scroll, no pull-to-bounce, no
+     browser pinch-zoom — all of that is handled in interaction.js. */
+  touch-action: none;
+  -webkit-touch-callout: none;
+}
+
+#viewport.panning {
+  cursor: grabbing;
+}
+
+#world {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+}
+
+#edges {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 1px;
+  height: 1px;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.edge {
+  fill: none;
+  stroke: var(--edge);
+  stroke-width: 1.5;
+}
+
+/* ---- cards ------------------------------------------------------------- */
+.card {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 250px;
+  min-height: 56px;
+  padding: 10px 12px;
+  background: var(--surface);
+  border: 1px solid var(--surface-border);
+  border-radius: 10px;
+  box-shadow: 0 1px 2px var(--shadow-tight), 0 4px 12px var(--shadow);
+  user-select: none;
+  cursor: grab;
+}
+
+.card.dragging {
+  cursor: grabbing;
+  box-shadow: 0 4px 8px var(--shadow-tight-lift), 0 12px 28px var(--shadow-lift);
+}
+
+.card.selected {
+  border-color: var(--accent-soft);
+  box-shadow: 0 0 0 2px var(--accent-soft-ring), 0 4px 12px var(--shadow);
+}
+
+.card.editing {
+  border-color: var(--accent-strong);
+  box-shadow: 0 0 0 2px var(--accent-strong-ring), 0 4px 12px var(--shadow);
+  cursor: text;
+}
+
+.card.editing .card-title,
+.card.editing .card-note {
+  outline: none;
+  cursor: text;
+}
+
+.card.editing .card-title:empty::before,
+.card.editing .card-note:empty::before {
+  content: attr(data-placeholder);
+  color: var(--placeholder);
+}
+
+/* ---- hover action bar (edit / add child / delete) --------------------- */
+.card-toolbar {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: none;
+  gap: 3px;
+  padding: 3px;
+  background: var(--surface);
+  border: 1px solid var(--surface-border);
+  border-radius: 8px;
+  box-shadow: 0 2px 8px var(--shadow);
+  z-index: 6;
+}
+
+/* Show on hover or when the card is selected; never while editing (the bar
+   would overlap the text the user is typing). */
+.card:hover > .card-toolbar,
+.card.selected > .card-toolbar {
+  display: flex;
+}
+
+.card-toolbar button {
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  transition: background 0.12s, color 0.12s;
+}
+
+.card-toolbar button:hover {
+  background: var(--accent-soft);
+  color: var(--ink);
+}
+
+.card-toolbar button[data-act="del"]:hover {
+  background: rgba(255, 90, 90, 0.18);
+  color: #ff8585;
+}
+
+/* ---- debug overlay (C7, F3) -------------------------------------------- */
+#debug-panel {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  min-width: 200px;
+  padding: 10px 12px;
+  background: var(--panel-bg);
+  border: 1px solid var(--surface-border);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px var(--shadow);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--ink);
+  white-space: pre;
+  display: none;
+  z-index: 20;
+  pointer-events: none;
+}
+
+#debug-panel.visible {
+  display: block;
+}
+
+.dbg-anchor {
+  fill: none;
+  stroke: var(--dbg-anchor);
+  stroke-width: 1.6;
+}
+
+.dbg-anchor-line {
+  stroke: var(--dbg-anchor);
+  stroke-width: 1;
+  stroke-dasharray: 4 4;
+  opacity: 0.65;
+}
+
+.dbg-vel {
+  stroke: var(--dbg-vel);
+  stroke-width: 1.6;
+}
+
+.card-root {
+  border-color: var(--root-border);
+}
+
+.card-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-word;
+  padding-right: 28px; /* clear the hover action bar */
+}
+
+.card-note {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 4px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ---- toolbar actions (only 一键整洁 + Guidance) ------------------------ */
+/* #toolbar is pointer-events:none so the canvas stays draggable under it;
+   the controls opt back in. */
+#tidy-btn {
+  pointer-events: auto;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent-strong);
+  background: var(--surface);
+  border: 1px solid var(--accent-soft-ring);
+  border-radius: 8px;
+  padding: 6px 14px;
+  cursor: pointer;
+  transition: transform 90ms ease, background 120ms ease, box-shadow 120ms ease, color 120ms ease;
+}
+
+#tidy-btn:hover {
+  background: var(--accent-soft-ring);
+  color: var(--ink);
+}
+
+/* Press feedback: the button dips under the finger, then a short pulse when
+   the tidy fires. This is what makes the press read as "it did something". */
+#tidy-btn:active {
+  transform: scale(0.93);
+}
+
+#tidy-btn.tidying {
+  animation: tidy-pulse 750ms ease;
+}
+
+@keyframes tidy-pulse {
+  0%   { transform: scale(0.93); box-shadow: 0 0 0 0 var(--accent-strong-ring); }
+  40%  { transform: scale(1.03); box-shadow: 0 0 0 7px rgba(201, 169, 80, 0); }
+  100% { transform: scale(1);    box-shadow: 0 0 0 0 rgba(201, 169, 80, 0); }
+}
+
+/* Quick "back to the library" right next to the main action; quiet by
+   default so 一键整洁 stays the visually dominant button. */
+#home-top-btn {
+  pointer-events: auto;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 6px 11px;
+  cursor: pointer;
+  transition: transform 90ms ease, background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+#home-top-btn:hover {
+  color: var(--ink);
+  border-color: var(--surface-border);
+  background: var(--surface);
+}
+
+#home-top-btn:active { transform: scale(0.93); }
+
+#guidance-btn {
+  pointer-events: auto;
+  margin-left: auto; /* sit at the far right, away from the tidy action */
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--surface-border);
+  border-radius: 8px;
+  padding: 6px 12px;
+  cursor: pointer;
+  transition: transform 90ms ease, background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+#guidance-btn:hover {
+  color: var(--ink);
+  border-color: var(--accent-soft-ring);
+  background: var(--surface);
+}
+
+#guidance-btn:active {
+  transform: scale(0.93);
+}
+
+/* ---- guidance: floating, blurred, modal help panel --------------------- */
+/* z-index 25 = above the home library (20), below the name dialog (30). */
+#guidance {
+  position: absolute;
+  inset: 0;
+  z-index: 25;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+}
+
+#guidance[hidden] { display: none; }
+
+/* The blur + dim that "虚化后面的图" and lock the board behind the panel. */
+.guidance-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.42);
+  -webkit-backdrop-filter: blur(8px) saturate(0.9);
+  backdrop-filter: blur(8px) saturate(0.9);
+}
+
+[data-theme="light"] .guidance-backdrop {
+  background: rgba(247, 245, 240, 0.42);
+}
+
+.guidance-inner {
+  position: relative;
+  width: min(560px, 100%);
+  max-height: calc(100vh - 96px);
+  overflow: auto;
+  padding: 20px 22px 18px;
+  background: var(--surface);
+  border: 1px solid var(--surface-border);
+  border-radius: 14px;
+  box-shadow: 0 24px 70px var(--shadow-lift);
+  animation: guidance-in 160ms ease;
+}
+
+@keyframes guidance-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.985); }
+  to   { opacity: 1; transform: none; }
+}
+
+.guidance-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.guidance-head h2 {
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+}
+
+#guidance-close {
+  width: 26px;
+  height: 26px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: transform 90ms ease, color 120ms ease, background 120ms ease;
+}
+
+#guidance-close:hover {
+  color: var(--ink);
+  background: var(--bg);
+  border-color: var(--surface-border);
+}
+
+#guidance-close:active { transform: scale(0.9); }
+
+.guidance-section { margin-bottom: 16px; }
+
+.guidance-section h3 {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+
+/* Buttons inside the guidance panel share one quiet, tactile style. */
+#guidance #home-btn,
+#guidance #board-name,
+.guidance-actions button {
+  pointer-events: auto;
+  width: auto;
+  height: auto;
+  font: inherit;
+  font-size: 13px;
+  color: var(--ink);
+  background: var(--bg);
+  border: 1px solid var(--surface-border);
+  border-radius: 8px;
+  padding: 7px 13px;
+  cursor: pointer;
+  transition: transform 90ms ease, border-color 120ms ease, background 120ms ease, color 120ms ease;
+}
+
+#guidance #home-btn:hover,
+#guidance #board-name:hover,
+.guidance-actions button:hover {
+  border-color: var(--accent-soft-ring);
+  color: var(--accent-strong);
+}
+
+#guidance #home-btn:active,
+#guidance #board-name:active,
+.guidance-actions button:active {
+  transform: scale(0.95);
+}
+
+#guidance #board-name {
+  font-weight: 600;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.guide-list {
+  list-style: none;
+  display: grid;
+  gap: 7px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.guide-list b {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.guide-list kbd {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  padding: 1px 5px;
+  border: 1px solid var(--surface-border);
+  border-radius: 5px;
+  background: var(--bg);
+  color: var(--ink);
+}
+
+.guidance-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 14px;
+  border-top: 1px solid var(--surface-border);
+}
+
+/* ---- home: the board library ------------------------------------------- */
+#home {
+  position: absolute;
+  inset: 44px 0 0 0; /* below the toolbar, so the back arrow stays reachable */
+  z-index: 20;
+  background: var(--bg);
+  overflow: auto;
+  padding: 28px 32px 48px;
+}
+#home:not([hidden]) { display: block; }
+
+.home-inner {
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+.home-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 22px;
+}
+
+.home-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+
+#home-back {
+  font: inherit;
+  font-size: 13px;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--surface-border);
+  border-radius: 8px;
+  padding: 7px 13px;
+  cursor: pointer;
+  transition: transform 90ms ease, border-color 120ms ease, color 120ms ease, background 120ms ease;
+}
+
+#home-back:hover {
+  color: var(--ink);
+  border-color: var(--accent-soft-ring);
+}
+
+#home-back:active { transform: scale(0.95); }
+
+.home-head h1 {
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+}
+
+.home-sub {
+  margin-top: 5px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+#new-board {
+  flex: none;
+  font: inherit;
+  font-size: 13px;
+  color: var(--accent-strong);
+  background: transparent;
+  border: 1px solid var(--accent-soft-ring);
+  border-radius: 8px;
+  padding: 7px 13px;
+  cursor: pointer;
+}
+
+#new-board:hover {
+  background: var(--accent-soft-ring);
+  color: var(--ink);
+}
+
+#board-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.home-card {
+  position: relative;
+  padding: 14px 14px 40px;
+  background: var(--surface);
+  border: 1px solid var(--surface-border);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: border-color 120ms ease, transform 120ms ease;
+}
+
+.home-card:hover {
+  border-color: var(--accent-soft-ring);
+  transform: translateY(-1px);
+}
+
+.home-card.current {
+  border-color: var(--accent-strong-ring);
+  box-shadow: 0 0 0 1px var(--accent-soft-ring);
+}
+
+.home-card-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.home-card-meta {
+  margin-top: 5px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.home-card-actions {
+  position: absolute;
+  left: 14px;
+  bottom: 10px;
+  display: flex;
+  gap: 6px;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.home-card:hover .home-card-actions,
+.home-card.current .home-card-actions {
+  opacity: 1;
+}
+
+.home-card-actions button {
+  font: inherit;
+  font-size: 11px;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--surface-border);
+  border-radius: 6px;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+
+.home-card-actions button:hover {
+  color: var(--ink);
+  border-color: var(--accent-soft-ring);
+}
+
+.home-empty {
+  margin-top: 28px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* ---- dialog ------------------------------------------------------------ */
+#dialog {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  background: rgba(0, 0, 0, 0.45);
+  align-items: center;
+  justify-content: center;
+}
+#dialog:not([hidden]) { display: flex; }
+
+.dialog-inner {
+  width: 330px;
+  padding: 18px;
+  background: var(--surface);
+  border: 1px solid var(--surface-border);
+  border-radius: 12px;
+  box-shadow: 0 18px 50px var(--shadow-lift);
+}
+
+#dialog-label {
+  display: block;
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+
+#dialog-input {
+  width: 100%;
+  font: inherit;
+  font-size: 14px;
+  color: var(--ink);
+  background: var(--bg);
+  border: 1px solid var(--surface-border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  outline: none;
+}
+
+#dialog-input:focus {
+  border-color: var(--accent-strong-ring);
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.dialog-actions button {
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 14px;
+  border-radius: 7px;
+  cursor: pointer;
+  border: 1px solid var(--surface-border);
+  background: transparent;
+  color: var(--muted);
+}
+
+.dialog-actions button:hover { color: var(--ink); }
+
+#dialog-ok {
+  border-color: var(--accent-soft-ring);
+  color: var(--accent-strong);
+}
+
+#dialog-ok:hover {
+  background: var(--accent-soft-ring);
+  color: var(--ink);
+}
+
+/* ---- touch devices (phones / tablets) ---------------------------------- */
+/* Hover does not exist here: the action bar appears on TAP (the card gets
+   .selected), so its buttons must be finger-sized, not mouse-sized. */
+@media (pointer: coarse) {
+  .card-toolbar {
+    gap: 4px;
+    padding: 4px;
+  }
+
+  .card-toolbar button {
+    width: 34px;
+    height: 34px;
+    font-size: 15px;
+    border-radius: 8px;
+  }
+
+  /* Clear the (now bigger) action bar. */
+  .card-title {
+    padding-right: 46px;
+  }
+
+  /* Comfortable tap targets on the top bar. */
+  #tidy-btn,
+  #home-top-btn,
+  #guidance-btn {
+    padding: 9px 14px;
+  }
+}
+
+/* ---- narrow screens (phones in portrait) ------------------------------- */
+@media (max-width: 720px) {
+  #toolbar {
+    height: 52px;
+    padding: 0 10px;
+    gap: 8px;
+  }
+
+  #tidy-btn { font-size: 12.5px; padding: 8px 12px; }
+  #home-top-btn { font-size: 12px; padding: 8px 10px; }
+  #guidance-btn { font-size: 12px; padding: 8px 10px; letter-spacing: 0; }
+
+  /* Cards must never be wider than the phone. */
+  .card {
+    width: min(250px, calc(100vw - 40px));
+  }
+
+  /* Guidance becomes a bottom sheet: thumb-reachable, safe-area aware. */
+  #guidance {
+    align-items: flex-end;
+    padding: 10px;
+  }
+
+  .guidance-inner {
+    width: 100%;
+    max-height: 86dvh;
+    border-radius: 16px 16px 0 0;
+    padding-bottom: calc(18px + env(safe-area-inset-bottom));
+  }
+
+  /* The library: one column, tighter gutters, stacked header. */
+  #home {
+    inset: 52px 0 0 0;
+    padding: 18px 14px 40px;
+  }
+
+  .home-head {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  .home-head-actions {
+    justify-content: flex-end;
+  }
+
+  #board-list {
+    grid-template-columns: 1fr;
+  }
+
+  .dialog-inner {
+    width: calc(100vw - 28px);
+  }
+
+  #debug-panel {
+    font-size: 10px;
+    min-width: 160px;
+  }
+}

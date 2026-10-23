@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <!-- Mobile: the canvas owns every gesture (drag/pan/pinch), so the page
+       itself must never scroll, bounce, or text-zoom under the finger. -->
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#f7f5f0" media="(prefers-color-scheme: light)">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'">
+  <title>cardwall</title>
+  <script src="renderer/theme-boot.js"></script>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="app">
+    <header id="toolbar">
+      <button id="tidy-btn" type="button" title="一键整洁：把整面重新排成标准树（T）" aria-label="一键整洁">一键整洁</button>
+      <button id="home-top-btn" type="button" title="返回首页（H）" aria-label="返回首页">返回首页</button>
+      <button id="guidance-btn" type="button" title="使用指南" aria-label="使用指南">Guidance</button>
+    </header>
+    <div id="viewport">
+      <div id="world">
+        <svg id="edges"></svg>
+        <!-- cards injected by renderer/app.js -->
+      </div>
+    </div>
+    <div id="debug-panel"></div>
+
+    <!-- Guidance: collapses the old top-bar clutter into one floating, blurred,
+         MODAL help surface. Opening it blurs + locks the board behind it; only
+         Esc or the close affordance dismiss it (see app.js keydown handler). -->
+    <section id="guidance" hidden>
+      <div class="guidance-backdrop"></div>
+      <div class="guidance-inner" role="dialog" aria-modal="true" aria-label="使用指南">
+        <header class="guidance-head">
+          <h2>使用指南</h2>
+          <button id="guidance-close" type="button" aria-label="关闭">✕</button>
+        </header>
+        <div class="guidance-body">
+          <div class="guidance-section">
+            <h3>当前图</h3>
+            <button id="board-name" type="button" title="重命名这幅图">未命名</button>
+          </div>
+          <div class="guidance-section">
+            <h3>怎么用</h3>
+            <ul class="guide-list">
+              <li><b>一键整洁</b>（顶栏按钮 / <kbd>T</kbd>）：把整面重新排成标准树</li>
+              <li><b>拖动节点</b>：拖到哪停哪，松手不回弹</li>
+              <li><b>＋</b>：在当前卡片下挂一个子节点</li>
+              <li><b>双击卡片</b>：编辑；<b>双击空白</b>：新建（挂到最近的节点）</li>
+              <li><b>把卡片拖到另一张卡片上</b>：改挂父级</li>
+              <li><b>Delete</b>：删除选中节点（子节点自动上挂）</li>
+              <li><b>滚轮</b>：以光标为锚缩放；<b>拖空白</b>：平移</li>
+              <li><b>⌘⇧L</b>：切换深色 / 纸感浅色主题</li>
+              <li><b>H</b>：返回首页 / 打开图库</li>
+            </ul>
+          </div>
+          <div class="guidance-actions">
+            <button id="home-btn" type="button">返回首页</button>
+            <button id="guidance-new" type="button">新建一幅</button>
+            <button id="guidance-theme" type="button">切换主题</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Home: the board library. Every wall is a named file; this is the
+         launcher you land on when you press H or the back arrow. -->
+    <section id="home" hidden>
+      <div class="home-inner">
+        <header class="home-head">
+          <div>
+            <h1>卡片墙</h1>
+            <p class="home-sub">每幅图是独立的一棵树，命名后随时打开</p>
+          </div>
+          <div class="home-head-actions">
+            <button id="home-back" type="button">← 返回当前图</button>
+            <button id="new-board" type="button">＋ 新建一幅</button>
+          </div>
+        </header>
+        <div id="board-list" role="list"></div>
+        <p id="home-empty" class="home-empty" hidden>还没有任何图，先新建一幅</p>
+      </div>
+    </section>
+
+    <!-- One small dialog, reused for "new board" and "rename". -->
+    <div id="dialog" hidden>
+      <form id="dialog-form" class="dialog-inner">
+        <label id="dialog-label" for="dialog-input">名称</label>
+        <input id="dialog-input" type="text" maxlength="80" autocomplete="off" spellcheck="false">
+        <div class="dialog-actions">
+          <button type="button" id="dialog-cancel">取消</button>
+          <button type="submit" id="dialog-ok">确定</button>
+        </div>
+      </form>
+    </div>
+  </div>
+  <script src="renderer/physics.js"></script>
+  <script src="renderer/sample.js"></script>
+  <script src="renderer/web-bridge.js"></script>
+  <script src="renderer/interaction.js"></script>
+  <script src="renderer/debug.js"></script>
+  <script src="renderer/app.js"></script>
+</body>
+</html>

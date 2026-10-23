@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="plate" x1="0.1" y1="0" x2="0.55" y2="1">
+      <stop offset="0" stop-color="#2d2d36"/>
+      <stop offset="0.5" stop-color="#1a1a20"/>
+      <stop offset="1" stop-color="#101014"/>
+    </linearGradient>
+    <linearGradient id="ink" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fdfbf5"/>
+      <stop offset="1" stop-color="#e4dfd1"/>
+    </linearGradient>
+    <linearGradient id="inkDim" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#cdc8ba"/>
+      <stop offset="1" stop-color="#b3ae9f"/>
+    </linearGradient>
+    <clipPath id="plateClip">
+      <rect x="100" y="100" width="824" height="824" rx="186" ry="186"/>
+    </clipPath>
+  </defs>
+
+  <!-- plate: near-black squircle, hairline highlight, soft top glow -->
+  <rect x="100" y="100" width="824" height="824" rx="186" ry="186" fill="url(#plate)"/>
+  <g clip-path="url(#plateClip)">
+    <ellipse cx="512" cy="90" rx="430" ry="170" fill="rgba(255,255,255,0.04)"/>
+    <rect x="100" y="100" width="824" height="824" fill="none" stroke="rgba(255,255,255,0.13)" stroke-width="10"/>
+  </g>
+
+  <!-- edges: the same cubic-bezier routing the board draws -->
+  <g fill="none" stroke="#6d6a60" stroke-width="26" stroke-linecap="round">
+    <path d="M512 442 C512 516 320 504 320 576"/>
+    <path d="M512 442 C512 516 704 504 704 576"/>
+  </g>
+
+  <!-- cards: trunk solid, children dimmer so the hierarchy reads at 16px -->
+  <g>
+    <rect x="352" y="304" width="320" height="138" rx="34" ry="34" fill="url(#ink)"/>
+    <rect x="172" y="576" width="296" height="126" rx="31" ry="31" fill="url(#inkDim)" />
+    <rect x="556" y="576" width="296" height="126" rx="31" ry="31" fill="url(#inkDim)" />
+  </g>
+</svg>

@@ -22,6 +22,17 @@
 
 [GitHub Releases](https://github.com/Franky100-pig/TreeNote/releases/latest) 提供 macOS（arm64）dmg。未做代码签名，首次启动需**右键 → 打开**，或执行 `xattr -dr com.apple.quarantine /Applications/cardwall.app`。
 
+## 网页版 & 手机
+
+**不想装 app？直接用浏览器：<https://franky100-pig.github.io/TreeNote/>**
+
+同一个 app、同一份渲染代码：桌面版走 Electron + 本地文件库，网页版在浏览器里用 localStorage 存图（换设备/清缓存会丢，桌面版才是持久库）。手机上专门做了适配：
+
+- **单指** = 鼠标：拖卡片、拖空白平移、点一下选中并浮出操作条
+- **双指捏合** = 缩放（以双指中点为锚）；**双指拖动** = 平移
+- 界面不再触发页面滚动/回弹/双击放大；Guidance 在手机上变成**底部抽屉**，库是单列
+- 数据只存在这台设备的浏览器里；想跨设备请用桌面版
+
 ## 操作
 
 | 动作 | 手势 |
@@ -36,7 +47,7 @@
 | 改挂父级 | 把卡片拖到另一张卡片上（禁止挂到自己的后代，避免成环） |
 | **一键整洁** | 点顶栏「一键整洁」按钮，或按 `T`：把**整面重新排成标准树**。按下有缩放反馈，按钮短暂显示「整理中…」 |
 | **自由拖动** | 任意节点拖到哪就停哪——**松手不回弹**，整面进入自由摆放；拖动时它和子节点跟手，其余节点保持原位 |
-| 平移 / 缩放 | 拖动空白处 / 滚轮（以光标为锚点，0.2–2.5） |
+| 平移 / 缩放 | 拖动空白处 / 滚轮（以光标为锚点，0.2–2.5）；**触屏：双指捏合缩放、双指拖动平移** |
 | 调试叠加 | `F3` 或 `Cmd+Shift+D`：fps、卡数、仿真时间、scale、峰值速度、机械能、树目标、速度矢量 |
 | 切换主题 | `Cmd/Ctrl+Shift+L`：黑色画布 ⇄ 纸感浅色，偏好会被记住 |
 
@@ -110,9 +121,17 @@ v0.7 起顶栏做了减法：只留「一键整洁」「返回首页」和右上
 ```bash
 npm install
 npm start          # 正常启动
-npm test           # 物理引擎单测（14 项）
+npm test           # 单测：物理引擎 14 项 + web 存储垫片 9 项
 npm run smoke      # 十一层自检：渲染 / 相机 / 调试 / 主题 / 交互 / 编辑 / 操作条 / 使用指南 / 存盘 / 首页 / 读盘
 npm run dist       # 打包 macOS dmg → dist/cardwall-<version>-arm64.dmg
+npm run build:web  # 生成网页版到 web/（同一份渲染代码 + localStorage 垫片）
+```
+
+网页版部署（GitHub Pages，`web/` 即整站，无构建依赖）：
+
+```bash
+npm run build:web
+git subtree push --prefix web origin gh-pages
 ```
 
 `npm run smoke` 会开一个隐藏窗口、用合成事件驱动真实监听器，全部通过才退出 0。
@@ -130,6 +149,8 @@ npm run dist
 ```
 main.js                 Electron 主进程：窗口、图库 IPC、vault 原子写、十一层 smoke 断言
 preload.js              contextBridge：listBoards / createBoard / openBoard / saveBoard / renameBoard / deleteBoard
+renderer/web-bridge.js  网页版存储垫片：localStorage 实现同一套 window.cardwall API（Electron 下自动让位）
+scripts/build-web.sh    生成网页版到 web/（复制 index.html / styles.css / renderer，注入 favicon）
 index.html styles.css    外壳、主题 token、卡片 / 边 / 调试面板样式
 renderer/theme-boot.js  首帧应用已保存的主题（避免浅色闪黑）
 renderer/physics.js     整齐树布局 + 临界阻尼弹簧积分器（UMD，Node 单测 + 浏览器共用）

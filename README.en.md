@@ -22,6 +22,17 @@ Press `H`, or click **Home** in the top bar (right next to one-click tidy). Name
 
 [GitHub Releases](https://github.com/Franky100-pig/TreeNote/releases/latest) ships a macOS (arm64) dmg. It isn't code-signed, so the first launch needs **right-click → Open**, or run `xattr -dr com.apple.quarantine /Applications/cardwall.app`.
 
+## Web edition & phones
+
+**Don't want to install anything? Just open <https://franky100-pig.github.io/TreeNote/> in a browser.**
+
+Same app, same renderer: the desktop build runs on Electron with a local file vault; the web build stores boards in the browser's localStorage (clearing site data loses them — the desktop app is the durable library). Phones get a dedicated pass:
+
+- **One finger** = a mouse: drag cards, drag empty space to pan, tap to select and float the action bar
+- **Pinch with two fingers** = zoom (anchored at the pinch midpoint); **drag two fingers** = pan
+- No page scroll, bounce, or double-tap zoom under the canvas; Guidance becomes a **bottom sheet** and the library is single-column
+- Data lives only in that browser; use the desktop app to carry boards across devices
+
 ## Controls
 
 | Action | Gesture |
@@ -36,7 +47,7 @@ Press `H`, or click **Home** in the top bar (right next to one-click tidy). Name
 | Re-parent | Drop a card onto another one (dropping onto your own descendant is blocked, to avoid cycles) |
 | **One-click tidy** | Click the "一键整洁" button or press `T`: re-flow the **whole wall into the standard tree**. The button dips on press and shows "整理中…" while it works |
 | **Free drag** | Drag any node where you like — it **stays where you drop it** (no snap-back) and the wall becomes free-placed; while dragging, the node and its subtree follow the cursor, everything else holds |
-| Pan / zoom | Drag empty canvas / scroll wheel (anchored at the cursor, 0.2–2.5) |
+| Pan / zoom | Drag empty canvas / scroll wheel (anchored at the cursor, 0.2–2.5); **touch: pinch with two fingers to zoom, drag two fingers to pan** |
 | Debug overlay | `F3` or `Cmd+Shift+D`: fps, card count, sim time, scale, peak speed, mechanical energy, tree target, velocity vectors |
 | Toggle theme | `Cmd/Ctrl+Shift+L`: black canvas ⇄ paper-light; the choice is remembered |
 
@@ -108,9 +119,17 @@ Auto-layout is deterministic, not a random initial guess. Quiet cards **fall asl
 ```bash
 npm install
 npm start          # normal launch
-npm test           # physics unit tests (14)
+npm test           # unit tests: physics (14) + web storage bridge (9)
 npm run smoke      # eleven-layer self-check: render / camera / debug / theme / interaction / editor / toolbar / guidance / persist / home / load
 npm run dist       # package the macOS dmg → dist/cardwall-<version>-arm64.dmg
+npm run build:web  # generate the web edition into web/ (same renderer + localStorage bridge)
+```
+
+Deploying the web edition (GitHub Pages; `web/` IS the site, no build dependencies):
+
+```bash
+npm run build:web
+git subtree push --prefix web origin gh-pages
 ```
 
 `npm run smoke` opens a hidden window, drives the real listeners with synthetic events, and only exits 0 if every layer passes.
@@ -128,11 +147,13 @@ npm run dist
 ```
 main.js                 Electron main process: window, library IPC, atomic vault writes, eleven-layer smoke assertions
 preload.js              contextBridge: listBoards / createBoard / openBoard / saveBoard / renameBoard / deleteBoard
+renderer/web-bridge.js  Web-edition storage: a localStorage twin of the same window.cardwall API (stands down under Electron)
+scripts/build-web.sh    Generates the web edition into web/ (copies index.html / styles.css / renderer, injects the favicon)
 index.html styles.css    Shell, theme tokens, card / edge / debug-panel styles
 renderer/theme-boot.js  Applies the saved theme on the first frame (no light-mode flash)
 renderer/physics.js     Tidy-tree layout + critically damped spring integrator (UMD, shared by Node tests and the browser)
 renderer/app.js         World container, edge geometry, fixed-step loop, camera, editing, persistence wiring
-renderer/interaction.js Pan / cursor-anchored zoom / dragging / re-parenting
+renderer/interaction.js Pan / cursor-anchored zoom / dragging / re-parenting / two-finger pinch
 renderer/debug.js       F3 overlay
 renderer/sample.js      The sample tree shown on first launch
 build/icon.svg          Icon source; build/icon.icns is rasterised from it
