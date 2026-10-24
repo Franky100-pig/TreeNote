@@ -31,16 +31,28 @@
 
 **不想装 app？先用浏览器试试：<https://franky100-pig.github.io/TreeNote/>**
 
-同一个 app、同一份渲染代码：**网页版什么都不记住**——刷新或关掉标签页，新建的图、卡片、视角全部消失（数据只活在当前这个标签页的内存里，不上传、不写 localStorage）。要留住，就下载桌面版。手机上专门做了适配：
+同一个 app、同一份渲染代码：**网页版什么都不记住**——刷新或关掉标签页，新建的图、卡片、视角全部消失（数据只活在当前这个标签页的内存里，不上传、不写 localStorage）。要留住，就下载桌面版。
+
+### 装到手机上（PWA）
+
+网页版是一个**可安装的 PWA**：装完之后桌面上有独立图标，点开是**独立窗口**（没有浏览器地址栏），而且**断网也能用**（应用外壳有离线缓存）。
+
+- **安卓**（Chrome）：打开网页 → 右上角 ⋮ → **「安装应用」/「添加到主屏幕」**
+- **iPhone / iPad**（Safari）：打开网页 → 底部分享按钮 → **「添加到主屏幕」**（苹果没有安装弹窗，走分享菜单；装好后用独立窗口打开）
+- 鸿蒙浏览器暂不支持，以后再说
+
+注意：装到手机的依然是**网页版逻辑**——不记忆任何内容，从后台划掉重开就是一幅全新的示例图。想留住自己的图，下载桌面版。
+
+手机上专门做了适配：
 
 - **单指** = 鼠标：拖卡片、拖空白平移、点一下选中并浮出操作条
 - **双指捏合** = 缩放（以双指中点为锚）；**双指拖动** = 平移
 - 界面不再触发页面滚动/回弹/双击放大；Guidance 在手机上变成**底部抽屉**，库是单列
 - 每次打开网页版都会得到一幅示例图，随便改，改完即忘
 
-手机上的效果（Guidance 变成底部抽屉，库为单列）：
+手机上的效果（独立窗口、无地址栏）：
 
-![web-mobile](docs/web-mobile.png)
+![pwa-mobile](docs/pwa-mobile.png)
 
 ## 操作
 
@@ -130,11 +142,11 @@ v0.7 起顶栏做了减法：只留「一键整洁」「返回首页」和右上
 ```bash
 npm install
 npm start          # 正常启动
-npm test           # 单测：物理引擎 14 项 + web 存储垫片 11 项
+npm test           # 单测：物理引擎 14 项 + web 存储垫片 11 项 + PWA 契约 7 项
 npm run smoke      # 十二层自检：渲染 / 相机 / 调试 / 主题 / 交互 / 编辑 / 操作条 / 使用指南 / 存盘 / 首页 / 读盘 / 相机恢复
 npm run dist       # 打包 macOS dmg → dist/cardwall-<version>-arm64.dmg
 npm run dist:win   # 打包 Windows 安装包 + zip（nsis；本机无 wine 时走 CI）
-npm run build:web  # 生成网页版到 web/（同一份渲染代码 + 纯内存垫片）
+npm run build:web  # 生成网页版到 web/（同一份渲染代码 + 纯内存垫片 + PWA 资产）
 ```
 
 网页版部署（GitHub Pages，`web/` 即整站，无构建依赖）：
@@ -145,6 +157,8 @@ git subtree push --prefix web origin gh-pages
 ```
 
 `npm run smoke` 会开一个隐藏窗口、用合成事件驱动真实监听器，全部通过才退出 0。
+
+⚠️ **Service Worker 维护约定**：改了 `pwa/service-worker.js` 里 `ASSETS` 清单中的任何文件，必须同时 bump `CACHE` 版本号（`cardwall-vN`）——activate 会删掉旧缓存，版本号是让已装到手机上的 PWA 拿到更新的唯一开关。
 
 国内网络打包建议带镜像（否则 electron zip 直连会超时）：
 
@@ -160,7 +174,12 @@ npm run dist
 main.js                 Electron 主进程：窗口、图库 IPC、vault 原子写、session.json、十二层 smoke 断言
 preload.js              contextBridge：listBoards / createBoard / openBoard / saveBoard / renameBoard / deleteBoard / loadSession / saveSession
 renderer/web-bridge.js  网页版存储垫片：纯内存实现同一套 window.cardwall API（Electron 下自动让位；刷新即忘，不碰任何存储后端）
-scripts/build-web.sh    生成网页版到 web/（复制 index.html / styles.css / renderer，注入 favicon）
+renderer/pwa-register.js 注册 service worker（仅网页版；Electron 下平台守卫直接返回，不注册）
+pwa/manifest.json       PWA 清单：standalone 显示、相对 start_url/scope、含 maskable 图标
+pwa/service-worker.js   离线外壳缓存：导航 network-first + 静态资源 stale-while-revalidate；只缓存外壳，不碰数据
+pwa/icons/              PWA 图标（192/512 + maskable + 苹果 180），由 scripts/gen-pwa-icons.py 从 build/icon.png 生成
+scripts/build-web.sh    生成网页版到 web/（复制 index.html / styles.css / renderer，注入 favicon + PWA <link>）
+scripts/gen-pwa-icons.py 由 build/icon.png 确定性生成 PWA 图标集
 .github/workflows/windows.yml  Windows 安装包 CI：workflow_dispatch 指定 tag → nsis + zip → 上传到 release
 index.html styles.css    外壳、主题 token、卡片 / 边 / 调试面板样式
 renderer/theme-boot.js  首帧应用已保存的主题（避免浅色闪黑；网页版跳过，因为网页版不记主题）

@@ -31,12 +31,26 @@ The desktop build **remembers the last-edited board and the camera it was viewed
 
 **Don't want to install anything? Try it in a browser: <https://franky100-pig.github.io/TreeNote/>**
 
-Same app, same renderer — but **the web edition remembers nothing**: reload or close the tab and every board, card, and camera position is gone (data lives only in that tab's memory; nothing is uploaded, nothing is written to localStorage). To keep your work, download the desktop app. Phones get a dedicated pass:
+Same app, same renderer — but **the web edition remembers nothing**: reload or close the tab and every board, card, and camera position is gone (data lives only in that tab's memory; nothing is uploaded, nothing is written to localStorage). To keep your work, download the desktop app.
+
+### Install it on your phone (PWA)
+
+The web edition is an installable **PWA**: once installed you get a home-screen icon, a **standalone window** (no browser chrome), and it **works offline** (the app shell is cached):
+
+- **Android** (Chrome): open the site → ⋮ menu → **"Install app" / "Add to Home screen"**
+- **iPhone / iPad** (Safari): open the site → Share → **"Add to Home Screen"** (iOS has no install prompt; it launches standalone afterwards)
+- HarmonyOS browsers are not supported yet — later
+
+Note: the installed PWA is still the **web-edition contract** — it remembers nothing. Swipe it away from the recents and you get a fresh sample board. To keep your work, download the desktop app.
+
+Phones get a dedicated pass:
 
 - **One finger** = a mouse: drag cards, drag empty space to pan, tap to select and float the action bar
 - **Pinch with two fingers** = zoom (anchored at the pinch midpoint); **drag two fingers** = pan
 - No page scroll, bounce, or double-tap zoom under the canvas; Guidance becomes a **bottom sheet** and the library is single-column
 - Every visit opens a fresh sample board — edit freely, it forgets on reload
+
+![pwa-mobile](docs/pwa-mobile.png)
 
 ## Controls
 
@@ -124,11 +138,11 @@ Auto-layout is deterministic, not a random initial guess. Quiet cards **fall asl
 ```bash
 npm install
 npm start          # normal launch
-npm test           # unit tests: physics (14) + web storage bridge (11)
+npm test           # unit tests: physics (14) + web storage bridge (11) + PWA contract (7)
 npm run smoke      # twelve-layer self-check: render / camera / debug / theme / interaction / editor / toolbar / guidance / persist / home / load / camera-restore
 npm run dist       # package the macOS dmg → dist/cardwall-<version>-arm64.dmg
 npm run dist:win   # package the Windows installer + zip (nsis; use CI when no local wine)
-npm run build:web  # generate the web edition into web/ (same renderer + in-memory bridge)
+npm run build:web  # generate the web edition into web/ (same renderer + in-memory bridge + PWA assets)
 ```
 
 Deploying the web edition (GitHub Pages; `web/` IS the site, no build dependencies):
@@ -139,6 +153,8 @@ git subtree push --prefix web origin gh-pages
 ```
 
 `npm run smoke` opens a hidden window, drives the real listeners with synthetic events, and only exits 0 if every layer passes.
+
+⚠️ **Service worker maintenance rule**: whenever you change any file listed in `ASSETS` inside `pwa/service-worker.js`, bump the `CACHE` version (`cardwall-vN`) in the same commit. The activate handler deletes every other cache key, so the version bump is the only lever that pushes an update to phones that already installed the PWA.
 
 Behind a mainland-China network, build with mirrors (a direct electron zip download otherwise times out):
 
@@ -154,8 +170,13 @@ npm run dist
 main.js                 Electron main process: window, library IPC, atomic vault writes, session.json, twelve-layer smoke assertions
 preload.js              contextBridge: listBoards / createBoard / openBoard / saveBoard / renameBoard / deleteBoard / loadSession / saveSession
 renderer/web-bridge.js  Web-edition storage: an in-memory twin of the same window.cardwall API (stands down under Electron; nothing survives a reload)
+renderer/pwa-register.js Registers the service worker (web edition only; the Electron platform guard returns early)
+pwa/manifest.json       PWA manifest: standalone display, relative start_url/scope, maskable icons included
+pwa/service-worker.js   Offline shell cache: network-first navigations + stale-while-revalidate assets; caches the shell only, never data
+pwa/icons/              PWA icons (192/512 + maskable + 180px apple-touch), generated from build/icon.png by scripts/gen-pwa-icons.py
 .github/workflows/windows.yml  Windows packaging CI: workflow_dispatch with a tag → nsis + zip → uploaded to the release
-scripts/build-web.sh    Generates the web edition into web/ (copies index.html / styles.css / renderer, injects the favicon)
+scripts/build-web.sh    Generates the web edition into web/ (copies index.html / styles.css / renderer, injects the favicon + PWA links)
+scripts/gen-pwa-icons.py Deterministically generates the PWA icon set from build/icon.png
 index.html styles.css    Shell, theme tokens, card / edge / debug-panel styles
 renderer/theme-boot.js  Applies the saved theme on the first frame (no light-mode flash; skipped on the web, which stores nothing)
 renderer/physics.js     Tidy-tree layout + critically damped spring integrator (UMD, shared by Node tests and the browser)
