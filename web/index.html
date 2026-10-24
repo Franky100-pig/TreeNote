@@ -19,6 +19,8 @@
   <script src="renderer/web-bridge.js"></script>
   <script src="renderer/theme-boot.js"></script>
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon-180.png">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -112,5 +114,10 @@
   <script src="renderer/interaction.js"></script>
   <script src="renderer/debug.js"></script>
   <script src="renderer/app.js"></script>
+  <!-- Registers the service worker (web edition only; no-op under Electron).
+       The PWA <link> tags (manifest / apple-touch-icon) are web-only too and
+       get injected by scripts/build-web.sh — the repo root has no manifest,
+       and the desktop build must not fetch 404s. -->
+  <script src="renderer/pwa-register.js"></script>
 </body>
 </html>
