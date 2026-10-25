@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -372,6 +372,29 @@ ipcMain.handle('boards:delete', async (event, id) => {
   }
 });
 
+// Export the board as a PDF. The renderer rasterises the canvas and hands us
+// the bytes; we show a native "Save As" dialog pre-filled with the board name
+// and write the file. Cancelling returns { ok:false, canceled:true } so the
+// renderer can stay silent. (The web edition never reaches this — its bridge
+// downloads the bytes directly in the browser.)
+ipcMain.handle('export:pdf', async (event, filename, bytes) => {
+  try {
+    const safeName = String(filename || 'cardwall.pdf');
+    const defaultPath = path.join(app.getPath('downloads'), safeName);
+    const win = event.sender ? BrowserWindow.fromWebContents(event.sender) : null;
+    const { canceled, filePath } = await dialog.showSaveDialog(win || null, {
+      title: '导出 PDF',
+      defaultPath: defaultPath,
+      filters: [{ name: 'PDF 文档', extensions: ['pdf'] }]
+    });
+    if (canceled || !filePath) return { ok: false, canceled: true };
+    fs.writeFileSync(filePath, Buffer.from(bytes));
+    return { ok: true, filePath: filePath };
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
+});
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1280,
@@ -452,6 +475,12 @@ function createWindow() {
         const okToolbar = !!toolbar && toolbar.ok;
         console.log('[smoke] toolbar-check:', JSON.stringify(toolbar), okToolbar ? 'PASS' : 'FAIL');
         if (!okToolbar) { app.exit(1); return; }
+        // Export: render the live board to a canvas, wrap it in a PDF and make
+        // sure we get a real, well-formed %PDF file back (no dialog in smoke).
+        const exportChk = await win.webContents.executeJavaScript('window.__cardwallExportCheck()');
+        const okExport = !!exportChk && exportChk.ok;
+        console.log('[smoke] export-check:', JSON.stringify(exportChk), okExport ? 'PASS' : 'FAIL');
+        if (!okExport) { app.exit(1); return; }
         // Guidance: the top-bar clutter is now one floating, blurred, modal
         // help panel. Verify it opens / blurs / closes, and grab a screenshot.
         const guidance = await win.webContents.executeJavaScript('window.__cardwallGuidanceCheck()');

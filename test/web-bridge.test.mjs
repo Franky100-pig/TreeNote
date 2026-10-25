@@ -415,3 +415,57 @@ test('web-bridge: a pin survives a full save -> open -> save cycle', async () =>
   await win.cardwall.saveBoard(created.id, { cards: [{ id: 'x', title: 't' }] });
   assert.equal((await win.cardwall.listBoards())[0].pinned, true);
 });
+
+test('web-bridge: exportPdf downloads the bytes in the browser', async () => {
+  // The renderer produces the PDF bytes; the web bridge must hand them to the
+  // browser as a download (it has no filesystem). Stub the browser APIs it
+  // touches and assert the right anchor + blob come out.
+  let clicked = null;
+  let blobType = null;
+  let blobBytes = null;
+  const origCreateObjectURL = globalThis.URL.createObjectURL;
+  const origBlob = globalThis.Blob;
+  const origDoc = globalThis.document;
+  const origSetTimeout = globalThis.setTimeout;
+
+  globalThis.URL.createObjectURL = () => 'blob:fake';
+  globalThis.Blob = class {
+    constructor(parts, opts) { blobBytes = new Uint8Array(parts[0]); blobType = opts && opts.type; }
+  };
+  const anchors = [];
+  globalThis.document = {
+    createElement() { const a = { click() { clicked = a; } }; anchors.push(a); return a; },
+    body: { appendChild() {}, removeChild() {} }
+  };
+  globalThis.setTimeout = () => 0;
+
+  try {
+    const { win } = makeWorld();
+    const bytes = new Uint8Array([1, 2, 3, 4, 5]);
+    const res = await win.cardwall.exportPdf('我的图.pdf', bytes);
+    assert.equal(res.ok, true);
+    assert.equal(anchors.length, 1, 'one anchor created');
+    assert.equal(anchors[0].download, '我的图.pdf', 'download name set');
+    assert.equal(clicked, anchors[0], 'anchor was clicked');
+    assert.equal(blobType, 'application/pdf');
+    assert.deepEqual(blobBytes, bytes, 'bytes passed verbatim');
+  } finally {
+    globalThis.URL.createObjectURL = origCreateObjectURL;
+    globalThis.Blob = origBlob;
+    globalThis.document = origDoc;
+    globalThis.setTimeout = origSetTimeout;
+  }
+});
+
+test('web-bridge: exportPdf survives a missing document (non-browser env)', async () => {
+  const origDoc = globalThis.document;
+  globalThis.document = undefined;
+  try {
+    const { win } = makeWorld();
+    const res = await win.cardwall.exportPdf('x.pdf', new Uint8Array([1]));
+    assert.equal(res.ok, false, 'gracefully reports failure without a document');
+    assert.ok(res.error, 'an error string is returned');
+  } finally {
+    globalThis.document = origDoc;
+  }
+});

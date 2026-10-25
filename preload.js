@@ -15,5 +15,8 @@ contextBridge.exposeInMainWorld('cardwall', {
   // Desktop only: the web bridge exposes neither, and the renderer skips the
   // whole restore path when they are absent.
   loadSession: () => ipcRenderer.invoke('session:load'),
-  saveSession: (session) => ipcRenderer.invoke('session:save', session)
+  saveSession: (session) => ipcRenderer.invoke('session:save', session),
+  // Export: the renderer builds the PDF bytes; the main process shows a native
+  // "Save As" dialog and writes the file.
+  exportPdf: (filename, bytes) => ipcRenderer.invoke('export:pdf', filename, bytes)
 });
