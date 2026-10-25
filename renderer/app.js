@@ -608,19 +608,26 @@
 
     var title = document.createElement('div');
     title.className = 'home-card-name';
-    title.textContent = (board.pinned ? '📌 ' : '') + board.name;
+    title.textContent = board.name;
 
     var meta = document.createElement('div');
     meta.className = 'home-card-meta';
     meta.textContent = board.cards + ' 张卡' + (board.savedAt ? ' · ' + relativeTime(board.savedAt) : '');
 
+    // The favourite star. It lives in the card's corner and is ALWAYS
+    // visible (a starred board must read as starred at a glance, without a
+    // hover), filled and gold when starred, hollow and faint otherwise.
+    var star = document.createElement('button');
+    star.type = 'button';
+    star.className = 'home-star' + (board.pinned ? ' on' : '');
+    star.dataset.act = 'pin';
+    star.textContent = board.pinned ? '★' : '☆';
+    star.title = board.pinned ? '取消收藏' : '收藏（置顶到图库最前）';
+    star.setAttribute('aria-label', board.pinned ? '取消收藏' : '收藏');
+    star.setAttribute('aria-pressed', board.pinned ? 'true' : 'false');
+
     var actions = document.createElement('div');
     actions.className = 'home-card-actions';
-    var pin = document.createElement('button');
-    pin.type = 'button';
-    pin.dataset.act = 'pin';
-    pin.textContent = board.pinned ? '取消置顶' : '置顶';
-    pin.title = board.pinned ? '从置顶区移除' : '置顶到图库最前面';
     var rename = document.createElement('button');
     rename.type = 'button';
     rename.dataset.act = 'rename';
@@ -629,10 +636,10 @@
     del.type = 'button';
     del.dataset.act = 'delete';
     del.textContent = '删除';
-    actions.appendChild(pin);
     actions.appendChild(rename);
     actions.appendChild(del);
 
+    card.appendChild(star);
     card.appendChild(title);
     card.appendChild(meta);
     card.appendChild(actions);
@@ -1976,15 +1983,15 @@
         return mine ? window.cardwall.pinBoard(mine.id, true) : null;
       })
       .then(function (r) {
-        // Pin through the REAL UI: the 置顶 button on the library card. The
+        // Favourite through the REAL UI: the star in the card's corner. The
         // toggle is asynchronous (bridge call + re-render), so give it a
         // beat before inspecting the DOM.
         var el = out.pinTargetId
           ? boardListEl.querySelector('.home-card[data-id="' + out.pinTargetId + '"]')
           : null;
-        var btn = el ? el.querySelector('[data-act="pin"]') : null;
-        out.pinButton = !!btn;
-        if (btn) btn.click();
+        var star = el ? el.querySelector('.home-star') : null;
+        out.pinButton = !!star;
+        if (star) star.click();
         return new Promise(function (res) { setTimeout(res, 150); });
       })
       .then(function () {
@@ -1996,13 +2003,16 @@
         var el = out.pinTargetId
           ? boardListEl.querySelector('.home-card[data-id="' + out.pinTargetId + '"]')
           : null;
-        var nameEl = el ? el.querySelector('.home-card-name') : null;
+        var star = el ? el.querySelector('.home-star') : null;
+        // A starred board shows a FILLED star (and says so to assistive
+        // tech); the card name itself stays clean.
         out.pinMarked = !!el && el.classList.contains('pinned') &&
-          !!nameEl && nameEl.textContent.indexOf('📌') === 0;
-        // Unpin through the same button, so the board is unpinned again
+          !!star && star.textContent === '★' &&
+          star.getAttribute('aria-pressed') === 'true' &&
+          star.classList.contains('on');
+        // Unstar through the same button, so the board is unstarred again
         // before it is deleted.
-        var btn = el ? el.querySelector('[data-act="pin"]') : null;
-        if (btn) btn.click();
+        if (star) star.click();
         return new Promise(function (res) { setTimeout(res, 150); });
       })
       .then(function () {
@@ -2011,6 +2021,12 @@
       .then(function (list) {
         var mine = list.filter(function (b) { return b.id === out.pinTargetId; })[0];
         out.unpinned = !!mine && mine.pinned === false;
+        var el = out.pinTargetId
+          ? boardListEl.querySelector('.home-card[data-id="' + out.pinTargetId + '"]')
+          : null;
+        var star = el ? el.querySelector('.home-star') : null;
+        out.unstarred = !!star && star.textContent === '☆' &&
+          star.getAttribute('aria-pressed') === 'false';
         return mine ? window.cardwall.deleteBoard(mine.id) : null;
       })
       .then(function (r) {
@@ -2023,7 +2039,7 @@
           out.opened && out.blankCard && out.listAfterCreate === before + 1 &&
           out.hasNew && out.renamed && out.renameVisible && out.deleted &&
           out.pinButton && out.pinFloats && out.pinMarked && out.unpinned &&
-          out.listAfterDelete === before;
+          out.unstarred && out.listAfterDelete === before;
         return out;
       });
   };

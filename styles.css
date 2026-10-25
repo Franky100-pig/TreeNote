@@ -752,9 +752,34 @@ body {
   padding-left: 12px;
 }
 
-.home-card.pinned .home-card-actions button[data-act="pin"] {
+/* The favourite star: always visible (a starred board must read as starred
+   without a hover), filled and gold when it is one, hollow and faint when it
+   is not. It sits in the card's top-right corner, clear of the name. */
+.home-star {
+  position: absolute;
+  top: 9px;
+  right: 10px;
+  padding: 2px 4px;
+  font-size: 15px;
+  line-height: 1;
+  color: var(--muted);
+  opacity: 0.45;
+  background: none;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: color 120ms ease, opacity 120ms ease, transform 120ms ease;
+}
+
+.home-star:hover {
+  opacity: 1;
   color: var(--accent-strong);
-  border-color: var(--accent-soft-ring);
+  transform: scale(1.15);
+}
+
+.home-card.pinned .home-star {
+  opacity: 1;
+  color: var(--accent-strong);
 }
 
 .home-card-name {
@@ -764,6 +789,7 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  padding-right: 26px; /* keep the name clear of the favourite star */
 }
 
 .home-card-meta {
@@ -908,6 +934,21 @@ body {
   #home-top-btn,
   #guidance-btn {
     padding: 9px 14px;
+  }
+
+  /* The favourite star must be a real tap target, not a 15px glyph. */
+  .home-star {
+    top: 4px;
+    right: 6px;
+    width: 34px;
+    height: 34px;
+    font-size: 19px;
+    padding: 0;
+    opacity: 0.7;
+  }
+
+  .home-card-name {
+    padding-right: 38px;
   }
 }
 
