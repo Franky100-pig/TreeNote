@@ -26,6 +26,7 @@
       <button id="tidy-btn" type="button" title="一键整洁：把整面重新排成标准树（T）" aria-label="一键整洁">一键整洁</button>
       <button id="home-top-btn" type="button" title="返回首页（H）" aria-label="返回首页">返回首页</button>
       <button id="guidance-btn" type="button" title="使用指南" aria-label="使用指南">Guidance</button>
+      <button id="export-pdf-btn" type="button" title="导出 PDF（⌘/Ctrl+E）" aria-label="导出 PDF">导出 PDF</button>
     </header>
     <div id="viewport">
       <div id="world">
@@ -62,6 +63,7 @@
               <li><b>Delete</b>：删除选中节点（子节点自动上挂）</li>
               <li><b>滚轮</b>：以光标为锚缩放；<b>拖空白</b>：平移</li>
               <li><b>⌘⇧L</b>：切换主题：深色 → 纸感浅色 → <b>跟随系统</b>（跟随系统会跟着 macOS 的深浅色实时变化）</li>
+              <li><b>导出 PDF</b>（⌘/Ctrl+E）：把当前这面墙导出成一份 PDF（整图缩进一页；桌面端弹出保存位置，网页端直接下载）</li>
               <li><b>H</b>：返回首页 / 打开图库</li>
               <li><b>图库里的 ☆</b>：收藏这幅图——点一下变成 ★，它会浮到图库最前面（桌面版记住）</li>
             </ul>
@@ -112,6 +114,9 @@
   <script src="renderer/sample.js"></script>
   <script src="renderer/interaction.js"></script>
   <script src="renderer/debug.js"></script>
+  <script src="renderer/pdf-writer.js"></script>
+  <script src="renderer/export-geom.js"></script>
+  <script src="renderer/export-pdf.js"></script>
   <script src="renderer/app.js"></script>
   <!-- Registers the service worker (web edition only; no-op under Electron).
        The PWA <link> tags (manifest / apple-touch-icon) are web-only too and

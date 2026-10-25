@@ -27,6 +27,9 @@ cp renderer/physics.js \
    renderer/web-bridge.js \
    renderer/interaction.js \
    renderer/debug.js \
+   renderer/pdf-writer.js \
+   renderer/export-geom.js \
+   renderer/export-pdf.js \
    renderer/app.js \
    renderer/theme-boot.js \
    renderer/pwa-register.js \

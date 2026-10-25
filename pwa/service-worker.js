@@ -19,7 +19,7 @@
  *                    that a real risk)
  *   - activate     → drop old cache keys, claim clients immediately
  */
-var CACHE = 'cardwall-v1';
+var CACHE = 'cardwall-v2';
 
 var ASSETS = [
   './',
@@ -38,6 +38,9 @@ var ASSETS = [
   './renderer/sample.js',
   './renderer/interaction.js',
   './renderer/debug.js',
+  './renderer/pdf-writer.js',
+  './renderer/export-geom.js',
+  './renderer/export-pdf.js',
   './renderer/app.js',
   './renderer/pwa-register.js'
 ];
