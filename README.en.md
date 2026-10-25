@@ -20,7 +20,7 @@ A tool is worth what it remembers about you. The desktop build is a wall with **
 |---|---|---|
 | **Card colours** | Hover a card → the colour dot → six presets (amber / rose / sky / mint / violet / lime), or "default" to clear it | Saved with the board, contrast-tuned per theme |
 | **Theme follows the system** | `⌘⇧L` cycles: dark → paper-light → **follow system** (flip macOS appearance and the canvas follows live) | The desktop remembers which state you chose |
-| **Pinned boards** | Click **置顶/pin** in the library: your everyday boards float to the top instead of being buried under whatever you edited last | The desktop remembers which boards are pinned |
+| **Starred boards (☆ → ★)** | Click the star in a library card's corner: your everyday boards float to the top instead of being buried under whatever you edited last | The desktop remembers which boards you starred |
 | **Where you stopped** | Quit and relaunch: you land straight back on the same board, at the same pan and zoom | `session.json`, local to your machine |
 
 **The web edition is deliberately forgetful** — reload or close the tab and everything is gone: <https://franky100-pig.github.io/TreeNote/> is a **fitting room**, not your study. If it feels right, install it on your own computer; that copy is the one that starts **remembering you**.
@@ -33,7 +33,7 @@ The personal-edition trio, plus a round of boundary hardening:
 
 - **Card colours**: six presets, applied from the hover bar; the colour is part of the card data and travels with the board
 - **Theme follows the system**: the cycle went from two states to three, and the third tracks the OS live
-- **Pin boards in the library**: favourites float to the top, and pinning never disturbs the recency order
+- **Star boards in the library**: the ☆ in a card's corner turns into a filled ★, and starred boards float to the top without disturbing the recency order
 - **Tests**: unit tests 35 → 53 (colour-whitelist boundaries, first-paint theme resolution, pinning boundaries, a two-sided sanitiser lockstep contract); 12 smoke layers green, now covering the pin through its real click path
 
 ## Home: named boards
@@ -49,7 +49,7 @@ Press `H`, or click **Home** in the top bar (right next to one-click tidy). Name
 - **macOS** (arm64) dmg — not code-signed, so the first launch needs **right-click → Open**, or run `xattr -dr com.apple.quarantine /Applications/cardwall.app`
 - **Windows** (x64) installer (`.exe`, assisted, no admin needed) + a portable `.zip`
 
-The desktop build **remembers the last-edited board and the camera it was viewed at**, so relaunching drops you straight back in — and, as of v0.9.0, it also remembers your card colours, your theme choice and which boards you pinned. Boards and camera live on the machine (`~/Library/Application Support/cardwall/vault/` on macOS, `%APPDATA%\cardwall\vault\` on Windows) and uninstalling never touches them.
+The desktop build **remembers the last-edited board and the camera it was viewed at**, so relaunching drops you straight back in — and, as of v0.9.0, it also remembers your card colours, your theme choice and which boards you starred. Boards and camera live on the machine (`~/Library/Application Support/cardwall/vault/` on macOS, `%APPDATA%\cardwall\vault\` on Windows) and uninstalling never touches them.
 
 ## Web edition & phones
 
@@ -94,7 +94,7 @@ Phones get a dedicated pass:
 | Pan / zoom | Drag empty canvas / scroll wheel (anchored at the cursor, 0.2–2.5); **touch: pinch with two fingers to zoom, drag two fingers to pan** |
 | Debug overlay | `F3` or `Cmd+Shift+D`: fps, card count, sim time, scale, peak speed, mechanical energy, tree target, velocity vectors |
 | Toggle theme | `Cmd/Ctrl+Shift+L`: black canvas ⇄ paper-light ⇄ **follow system** (auto tracks macOS light/dark live); the mode is remembered (desktop only — the web edition forgets on reload) |
-| **Pin a board** | In the library, click **置顶/pin** on a card: favourites float to the top of the list regardless of recency (desktop only) |
+| **Star a board** | Click the **☆** in a library card's top-right corner: it becomes a filled **★** and the board floats to the top of the list regardless of recency (desktop only) |
 
 The **Guidance** panel floats above the canvas while blurring and locking the board behind it:
 
