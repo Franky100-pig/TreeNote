@@ -817,6 +817,8 @@
   });
   var tidyBtn = document.getElementById('tidy-btn');
   if (tidyBtn) tidyBtn.addEventListener('click', function () { tidyAll(); });
+  var exportPdfBtn = document.getElementById('export-pdf-btn');
+  if (exportPdfBtn) exportPdfBtn.addEventListener('click', function () { exportBoardPdf(); });
   newBoardBtn.addEventListener('click', function () {
     askName({ title: '新的一幅图', value: '' }).then(function (name) {
       if (name == null) return;
@@ -1115,6 +1117,66 @@
     }
   }
 
+  // Export the current board as a PDF. The board is rasterised by the canvas
+  // renderer (so CJK text, card colours and bezier edges all come out exactly
+  // as on screen) and wrapped in a dependency-free PDF. Desktop routes the
+  // bytes through the main process for a native "Save As" dialog; the web
+  // edition downloads them directly in the browser.
+  function exportBoardPdf() {
+    if (!window.CardwallExport || !window.CardwallPdf) return;
+    var themeAttr = document.documentElement.getAttribute('data-theme');
+    var themeName = themeAttr === 'light' ? 'light' : 'dark';
+    var render = window.CardwallExport.renderBoardToPdf(world.cards, {
+      theme: themeName, title: currentBoard.name
+    });
+    window.CardwallExport.buildPdfFromCanvas(render, 0.92).then(function (pdfBytes) {
+      var filename = (window.CardwallGeom ? window.CardwallGeom.sanitizeFilename(currentBoard.name) : 'cardwall') + '.pdf';
+      if (window.cardwall && typeof window.cardwall.exportPdf === 'function') {
+        window.cardwall.exportPdf(filename, pdfBytes);
+      } else {
+        // Fallback anchor download (e.g. a smoke run without a bridge).
+        var blob = new Blob([pdfBytes], { type: 'application/pdf' });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url; a.download = filename;
+        document.body.appendChild(a); a.click();
+        document.body.removeChild(a);
+        setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+      }
+    }).catch(function (err) {
+      console.error('cardwall: PDF export failed', err);
+    });
+  }
+
+  // Smoke-only: render the current board to a PDF and report its shape without
+  // touching a dialog (the desktop save path is exercised manually). Lets CI
+  // prove the export pipeline (canvas -> JPEG -> PDF) actually runs end to end.
+  window.__cardwallExportCheck = function () {
+    return new Promise(function (resolve) {
+      try {
+        if (!window.CardwallExport || !window.CardwallPdf) {
+          resolve({ ok: false, error: 'no export modules' });
+          return;
+        }
+        var themeAttr = document.documentElement.getAttribute('data-theme');
+        var themeName = themeAttr === 'light' ? 'light' : 'dark';
+        var render = window.CardwallExport.renderBoardToPdf(world.cards, {
+          theme: themeName, title: currentBoard.name
+        });
+        window.CardwallExport.buildPdfFromCanvas(render, 0.92).then(function (bytes) {
+          var head = '';
+          for (var i = 0; i < Math.min(8, bytes.length); i++) head += String.fromCharCode(bytes[i]);
+          resolve({
+            ok: bytes.length > 100 && head.indexOf('%PDF') === 0,
+            bytesLen: bytes.length, header: head,
+            pageW: render.pageW, pageH: render.pageH,
+            cards: world.cards.length
+          });
+        }).catch(function (e) { resolve({ ok: false, error: String(e) }); });
+      } catch (e) { resolve({ ok: false, error: String(e) }); }
+    });
+  };
+
   function deleteCard(id) {
     var card = CardPhysics.findCard(world, id);
     if (!card) return;
@@ -1353,6 +1415,11 @@
     if ((e.key === 'h' || e.key === 'H') && !e.metaKey && !e.ctrlKey && !e.altKey && !editingId) {
       e.preventDefault();
       showHome(true);
+      return;
+    }
+    if ((e.metaKey || e.ctrlKey) && (e.key === 'e' || e.key === 'E') && !editingId) {
+      e.preventDefault();
+      exportBoardPdf();
       return;
     }
     if (editingId) return; // the editor owns the keyboard
