@@ -10,6 +10,8 @@ contextBridge.exposeInMainWorld('cardwall', {
   saveBoard: (id, board) => ipcRenderer.invoke('boards:save', id, board),
   renameBoard: (id, name) => ipcRenderer.invoke('boards:rename', id, name),
   deleteBoard: (id) => ipcRenderer.invoke('boards:delete', id),
+  // Favourite / pin: floats a board to the top of the library.
+  pinBoard: (id, pinned) => ipcRenderer.invoke('boards:pin', id, pinned),
   // Desktop only: the web bridge exposes neither, and the renderer skips the
   // whole restore path when they are absent.
   loadSession: () => ipcRenderer.invoke('session:load'),

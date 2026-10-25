@@ -109,6 +109,15 @@ function cleanName(name) {
   return s || DEFAULT_NAME;
 }
 
+// Preset card colours (whitelisted — an arbitrary colour string from a
+// hand-edited JSON file must never reach the DOM). `null` = no colour, the
+// default grey panel. The CSS defines the actual pigments per theme.
+const CARD_COLORS = ['amber', 'rose', 'sky', 'mint', 'violet', 'lime'];
+
+function cleanColor(c) {
+  return CARD_COLORS.indexOf(c) >= 0 ? c : null;
+}
+
 function sanitizeBoard(data) {
   const raw = data && Array.isArray(data.cards) ? data.cards.slice(0, MAX_CARDS) : [];
   const ids = new Set();
@@ -122,7 +131,9 @@ function sanitizeBoard(data) {
       note: String(c.note == null ? '' : c.note).slice(0, MAX_NOTE),
       x: Number.isFinite(c.x) ? c.x : 0,
       y: Number.isFinite(c.y) ? c.y : 0,
-      parent: null
+      parent: null,
+      // Optional preset colour (see CARD_COLORS); anything else -> null.
+      color: cleanColor(c.color)
       // Free placement survives a reload: a card the user has positioned stays
       // put until they press 一键整洁 (the tidy pull is opt-in).
     });
@@ -202,11 +213,17 @@ function listBoards() {
       id: id,
       name: cleanName(board.name),
       cards: Array.isArray(board.cards) ? board.cards.length : 0,
-      savedAt: board.savedAt || null
+      savedAt: board.savedAt || null,
+      // Personal-library flag: a pinned board is a favourite, not a sort key.
+      pinned: board.pinned === true
     });
   }
-  // Most recently touched first; a board without a stamp sorts last.
-  out.sort((a, b) => String(b.savedAt || '').localeCompare(String(a.savedAt || '')));
+  // Pinned first (favourites float to the top), then most recently touched.
+  // A board without a stamp sorts last within its group.
+  out.sort((a, b) => {
+    if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+    return String(b.savedAt || '').localeCompare(String(a.savedAt || ''));
+  });
   return out;
 }
 
@@ -304,6 +321,9 @@ ipcMain.handle('boards:save', (event, id, data) => {
   };
   // A board left in free placement reopens free; one left tidy reopens tidy.
   if (clean.tidy !== undefined) board.tidy = clean.tidy;
+  // Pinning is a library-level flag with its own handler; a card save must
+  // never silently un-favourite the board it is writing to.
+  if (previous && previous.pinned === true) board.pinned = true;
   writeBoardFile(safe, board);
   return { ok: true, path: boardPath(safe), cards: clean.cards.length, name: name };
 });
@@ -318,6 +338,22 @@ ipcMain.handle('boards:rename', (event, id, name) => {
   board.savedAt = new Date().toISOString();
   writeBoardFile(safe, board);
   return { ok: true, name: next };
+});
+
+// Favourite / pin a board: it floats to the top of the library (a personal
+// shortlist), independent of recency. Pinning never touches savedAt, so the
+// recency order of the rest of the library is undisturbed.
+ipcMain.handle('boards:pin', (event, id, pinned) => {
+  const safe = safeId(id);
+  if (!safe) return { ok: false, error: 'invalid id' };
+  const board = readBoardFile(safe);
+  if (!board) return { ok: false, error: 'not found' };
+  const next = pinned === true;
+  if (board.pinned === next) return { ok: true, pinned: next };
+  if (next) board.pinned = true;
+  else delete board.pinned; // absent == not pinned, keeps old files lean
+  writeBoardFile(safe, board);
+  return { ok: true, pinned: next };
 });
 
 // Deleting a board puts the file in the OS trash instead of unlinking it, so a
