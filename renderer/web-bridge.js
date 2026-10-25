@@ -211,10 +211,30 @@
         order = order.filter(function (b) { return b !== safe; });
         if (!existed) return Promise.resolve({ ok: false, error: 'not found' });
         return Promise.resolve({ ok: true });
-      }
+      },
 
       // No loadSession/saveSession here on purpose: the web edition keeps
       // nothing across reloads, so there is no session to restore.
+
+      // Export: the renderer hands us the PDF bytes; the browser downloads them
+      // directly (the web edition has no filesystem to save into). Mirrors the
+      // desktop bridge's exportPdf contract so app.js needs no platform branch.
+      exportPdf: function (filename, bytes) {
+        try {
+          var blob = new Blob([bytes], { type: 'application/pdf' });
+          var url = URL.createObjectURL(blob);
+          var a = document.createElement('a');
+          a.href = url;
+          a.download = filename || 'cardwall.pdf';
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+          return Promise.resolve({ ok: true });
+        } catch (e) {
+          return Promise.resolve({ ok: false, error: String(e) });
+        }
+      }
     };
     return true;
   }
