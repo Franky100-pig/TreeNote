@@ -186,6 +186,96 @@ body {
   color: var(--placeholder);
 }
 
+/* ---- preset card colours -------------------------------------------------
+   A whitelist of six tints (see CARD_COLORS in app.js; main.js sanitises to
+   the same list, so a hand-edited file can never inject an arbitrary value).
+   Each preset defines two hooks — a soft wash for the panel and a stronger
+   border/left-bar — tuned per theme so text contrast never breaks. A card
+   without data-color keeps the default surface above. */
+.card[data-color] {
+  background: var(--card-wash);
+  border-color: var(--card-tint);
+  border-left: 3px solid var(--card-tint);
+}
+
+/* Dark theme pigments (the default canvas is black). */
+[data-color="amber"]  { --card-wash: rgba(201, 169, 80, 0.10);  --card-tint: #c9a950; }
+[data-color="rose"]   { --card-wash: rgba(224, 122, 138, 0.10); --card-tint: #e07a8a; }
+[data-color="sky"]    { --card-wash: rgba(106, 169, 224, 0.10); --card-tint: #6aa9e0; }
+[data-color="mint"]   { --card-wash: rgba(110, 200, 170, 0.10); --card-tint: #6ec8aa; }
+[data-color="violet"] { --card-wash: rgba(167, 139, 250, 0.10); --card-tint: #a78bfa; }
+[data-color="lime"]   { --card-wash: rgba(163, 214, 108, 0.10); --card-tint: #a3d66c; }
+
+/* Light theme pigments: the paper canvas is near-white, so washes go a touch
+   deeper and tints darker to stay legible on #ffffff. */
+[data-theme="light"] [data-color="amber"]  { --card-wash: rgba(201, 169, 80, 0.16);  --card-tint: #9a7d2a; }
+[data-theme="light"] [data-color="rose"]   { --card-wash: rgba(224, 122, 138, 0.14); --card-tint: #b04a5c; }
+[data-theme="light"] [data-color="sky"]    { --card-wash: rgba(106, 169, 224, 0.16); --card-tint: #2f6ea8; }
+[data-theme="light"] [data-color="mint"]   { --card-wash: rgba(110, 200, 170, 0.16); --card-tint: #2e8a6e; }
+[data-theme="light"] [data-color="violet"] { --card-wash: rgba(167, 139, 250, 0.14); --card-tint: #6d4fc4; }
+[data-theme="light"] [data-color="lime"]   { --card-wash: rgba(163, 214, 108, 0.18); --card-tint: #5d8a2e; }
+
+/* The colour swatch button mirrors the current tint so the bar reads as a
+   colour control even before the palette opens. */
+.card-color-btn::after {
+  content: "";
+  display: block;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--card-tint, var(--muted));
+  border: 1px solid rgba(128, 128, 128, 0.45);
+}
+
+.card-color-wrap {
+  position: relative;
+  display: flex;
+}
+
+/* The palette: a small popover above the action bar. Kept in the DOM (hidden)
+   so the delegated click handler can toggle it without rebuilding markup. */
+.card-palette {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  display: flex;
+  gap: 4px;
+  padding: 5px;
+  background: var(--surface);
+  border: 1px solid var(--surface-border);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px var(--shadow);
+  z-index: 7;
+}
+
+.card-palette[hidden] { display: none; }
+
+.card-swatch {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1px solid rgba(128, 128, 128, 0.45);
+  padding: 0;
+  cursor: pointer;
+  transition: transform 0.1s;
+}
+
+.card-swatch:hover { transform: scale(1.15); }
+
+.card-swatch[data-swatch="amber"]  { background: #c9a950; }
+.card-swatch[data-swatch="rose"]   { background: #e07a8a; }
+.card-swatch[data-swatch="sky"]    { background: #6aa9e0; }
+.card-swatch[data-swatch="mint"]   { background: #6ec8aa; }
+.card-swatch[data-swatch="violet"] { background: #a78bfa; }
+.card-swatch[data-swatch="lime"]   { background: #a3d66c; }
+
+/* "No colour": a hollow dot with a slash. */
+.card-swatch-none {
+  background:
+    linear-gradient(45deg, transparent 44%, var(--muted) 44%, var(--muted) 56%, transparent 56%),
+    var(--surface);
+}
+
 /* ---- hover action bar (edit / add child / delete) --------------------- */
 .card-toolbar {
   position: absolute;
@@ -653,6 +743,18 @@ body {
 .home-card.current {
   border-color: var(--accent-strong-ring);
   box-shadow: 0 0 0 1px var(--accent-soft-ring);
+}
+
+/* Pinned (favourites float to the top of the library): a warm left bar so the
+   shortlist reads at a glance, without shouting over the "current" ring. */
+.home-card.pinned {
+  border-left: 3px solid var(--accent-soft);
+  padding-left: 12px;
+}
+
+.home-card.pinned .home-card-actions button[data-act="pin"] {
+  color: var(--accent-strong);
+  border-color: var(--accent-soft-ring);
 }
 
 .home-card-name {
