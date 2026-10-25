@@ -150,11 +150,15 @@ test('web-bridge: sanitizeBoard drops junk and resolves late parents (mirrors ma
       { id: 'self', parent: 'self' },                      // self parent -> null
       { id: 'ghost', parent: 'missing' },                  // dangling parent -> null
       { id: 'nan', x: 'abc', y: null },                    // bad coords -> 0
-      { id: 'long', title: 'x'.repeat(600) }               // title clipped
+      { id: 'long', title: 'x'.repeat(600) },              // title clipped
+      { id: 'col-ok', color: 'rose' },                     // whitelisted colour kept
+      { id: 'col-bad', color: 'javascript:alert(1)' },     // arbitrary value -> null
+      { id: 'col-bad2', color: 'RED' },                    // case-sensitive whitelist
+      { id: 'col-bad3', color: 42 }                        // non-string -> null
     ]
   });
   const ids = clean.cards.map((c) => c.id);
-  assert.deepEqual(ids, ['child', 'root', 'self', 'ghost', 'nan', 'long']);
+  assert.deepEqual(ids, ['child', 'root', 'self', 'ghost', 'nan', 'long', 'col-ok', 'col-bad', 'col-bad2', 'col-bad3']);
   assert.equal(clean.cards[0].parent, 'root', 'late parent resolved');
   assert.equal(clean.cards[2].parent, null);
   assert.equal(clean.cards[3].parent, null);
@@ -162,6 +166,25 @@ test('web-bridge: sanitizeBoard drops junk and resolves late parents (mirrors ma
   assert.equal(clean.cards[4].y, 0);
   assert.equal(clean.cards[5].title.length, 500);
   assert.equal(clean.tidy, undefined, 'no tidy flag in, none out');
+  // Card colours: only the whitelist survives; everything else -> null.
+  assert.equal(clean.cards[6].color, 'rose');
+  assert.equal(clean.cards[7].color, null);
+  assert.equal(clean.cards[8].color, null);
+  assert.equal(clean.cards[9].color, null);
+});
+
+test('web-bridge: card colours survive save -> open', async () => {
+  const { win } = makeWorld();
+  const created = await win.cardwall.createBoard('A');
+  await win.cardwall.saveBoard(created.id, {
+    cards: [
+      { id: 'a', title: 'A', color: 'sky' },
+      { id: 'b', title: 'B' } // no colour -> null
+    ]
+  });
+  const opened = await win.cardwall.openBoard(created.id);
+  assert.equal(opened.cards[0].color, 'sky');
+  assert.equal(opened.cards[1].color, null);
 });
 
 test('web-bridge: listBoards sorts most-recently-saved first', async () => {
@@ -173,4 +196,45 @@ test('web-bridge: listBoards sorts most-recently-saved first', async () => {
   const list = await win.cardwall.listBoards();
   assert.equal(list[0].id, a.id);
   assert.equal(list[0].cards, 1);
+});
+
+test('web-bridge: pinning floats a board to the top, unpin restores recency', async () => {
+  const { win } = makeWorld();
+  const a = await win.cardwall.createBoard('A');
+  await new Promise((r) => setTimeout(r, 5));
+  const b = await win.cardwall.createBoard('B'); // B is the most recent
+  let list = await win.cardwall.listBoards();
+  assert.deepEqual(list.map((x) => x.id), [b.id, a.id]);
+  assert.deepEqual(list.map((x) => x.pinned), [false, false]);
+
+  // Pin the OLDER board: it must jump above the newer one.
+  const r = await win.cardwall.pinBoard(a.id, true);
+  assert.deepEqual(r, { ok: true, pinned: true });
+  list = await win.cardwall.listBoards();
+  assert.deepEqual(list.map((x) => x.id), [a.id, b.id]);
+  assert.deepEqual(list.map((x) => x.pinned), [true, false]);
+
+  // Unpin: back to pure recency.
+  await win.cardwall.pinBoard(a.id, false);
+  list = await win.cardwall.listBoards();
+  assert.deepEqual(list.map((x) => x.id), [b.id, a.id]);
+
+  // Pinning a missing board fails like main.js; a truthy-but-not-true value
+  // normalises to false (strict === true).
+  assert.deepEqual(await win.cardwall.pinBoard('ghost', true), { ok: false, error: 'not found' });
+  assert.deepEqual(await win.cardwall.pinBoard(a.id, 1), { ok: true, pinned: false });
+});
+
+test('web-bridge: a card save never un-pins the board (mirrors main.js)', async () => {
+  const { win } = makeWorld();
+  const created = await win.cardwall.createBoard('A');
+  await win.cardwall.pinBoard(created.id, true);
+  const savedAtBefore = (await win.cardwall.listBoards())[0].savedAt;
+  await win.cardwall.saveBoard(created.id, { cards: [{ id: 'x', title: 't', color: 'mint' }] });
+  const after = (await win.cardwall.listBoards())[0];
+  assert.equal(after.pinned, true, 'pin survives a card save');
+  assert.equal(after.cards, 1);
+  // The pin handler itself must not touch savedAt (recency undisturbed) —
+  // saveBoard legitimately does, that is a separate action.
+  assert.ok(after.savedAt >= savedAtBefore);
 });
