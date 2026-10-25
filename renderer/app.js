@@ -1972,6 +1972,45 @@
       .then(function (list) {
         var mine = list.filter(function (b) { return b.name === 'smoke renamed'; })[0];
         out.renameVisible = !!mine;
+        out.pinTargetId = mine ? mine.id : null;
+        return mine ? window.cardwall.pinBoard(mine.id, true) : null;
+      })
+      .then(function (r) {
+        // Pin through the REAL UI: the 置顶 button on the library card. The
+        // toggle is asynchronous (bridge call + re-render), so give it a
+        // beat before inspecting the DOM.
+        var el = out.pinTargetId
+          ? boardListEl.querySelector('.home-card[data-id="' + out.pinTargetId + '"]')
+          : null;
+        var btn = el ? el.querySelector('[data-act="pin"]') : null;
+        out.pinButton = !!btn;
+        if (btn) btn.click();
+        return new Promise(function (res) { setTimeout(res, 150); });
+      })
+      .then(function () {
+        return window.cardwall.listBoards();
+      })
+      .then(function (list) {
+        var first = list[0];
+        out.pinFloats = !!first && first.id === out.pinTargetId && first.pinned === true;
+        var el = out.pinTargetId
+          ? boardListEl.querySelector('.home-card[data-id="' + out.pinTargetId + '"]')
+          : null;
+        var nameEl = el ? el.querySelector('.home-card-name') : null;
+        out.pinMarked = !!el && el.classList.contains('pinned') &&
+          !!nameEl && nameEl.textContent.indexOf('📌') === 0;
+        // Unpin through the same button, so the board is unpinned again
+        // before it is deleted.
+        var btn = el ? el.querySelector('[data-act="pin"]') : null;
+        if (btn) btn.click();
+        return new Promise(function (res) { setTimeout(res, 150); });
+      })
+      .then(function () {
+        return window.cardwall.listBoards();
+      })
+      .then(function (list) {
+        var mine = list.filter(function (b) { return b.id === out.pinTargetId; })[0];
+        out.unpinned = !!mine && mine.pinned === false;
         return mine ? window.cardwall.deleteBoard(mine.id) : null;
       })
       .then(function (r) {
@@ -1983,6 +2022,7 @@
         out.ok = out.visible && out.topHome && out.cards >= 1 && out.created &&
           out.opened && out.blankCard && out.listAfterCreate === before + 1 &&
           out.hasNew && out.renamed && out.renameVisible && out.deleted &&
+          out.pinButton && out.pinFloats && out.pinMarked && out.unpinned &&
           out.listAfterDelete === before;
         return out;
       });
