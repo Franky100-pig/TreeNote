@@ -22,10 +22,18 @@ A tool is worth what it remembers about you. The desktop build is a wall with **
 | **Theme follows the system** | `⌘⇧L` cycles: dark → paper-light → **follow system** (flip macOS appearance and the canvas follows live) | The desktop remembers which state you chose |
 | **Starred boards (☆ → ★)** | Click the star in a library card's corner: your everyday boards float to the top instead of being buried under whatever you edited last | The desktop remembers which boards you starred |
 | **Where you stopped** | Quit and relaunch: you land straight back on the same board, at the same pan and zoom | `session.json`, local to your machine |
+| **Export PDF** | `⌘/Ctrl+E` or the top-bar "Export PDF" button: render **the wall as it is right now** to a PDF — card colours, edges and both CJK and Latin titles/notes come out exactly as on screen, the whole map fitted onto one A4 page — to print or send on | Desktop shows a save dialog for the location; the web edition downloads it straight from the browser — your wall, take it anywhere |
 
 **The web edition is deliberately forgetful** — reload or close the tab and everything is gone: <https://franky100-pig.github.io/TreeNote/> is a **fitting room**, not your study. If it feels right, install it on your own computer; that copy is the one that starts **remembering you**.
 
 > In one line: **the web edition helps you decide in 30 seconds whether to download; the desktop app is the one you keep.** The web build writes no localStorage, uploads nothing — what you type never leaves that tab.
+
+## What's new in v0.9.1
+
+Take the wall with you:
+
+- **Export PDF**: a new top-bar "Export PDF" button (shortcut `⌘/Ctrl+E`). It renders the current wall to a PDF — card colours, edges and both Chinese and English titles/notes kept pixel-faithful, the entire map scaled to fit one A4 page; desktop pops a save dialog for the location, the web edition downloads it directly in the browser
+- **Tests**: unit tests 53 → 73 (added the PDF writer, export geometry, and web-edition download boundary tests); smoke 12 → 13 layers (new export-check that really runs the canvas → JPEG → PDF pipeline end to end)
 
 ## What's new in v0.9.0
 
@@ -44,7 +52,7 @@ Press `H`, or click **Home** in the top bar (right next to one-click tidy). Name
 
 ## Download
 
-[GitHub Releases](https://github.com/Franky100-pig/TreeNote/releases/latest) ships (currently **v0.9.0**):
+[GitHub Releases](https://github.com/Franky100-pig/TreeNote/releases/latest) ships (currently **v0.9.1**):
 
 - **macOS** (arm64) dmg — not code-signed, so the first launch needs **right-click → Open**, or run `xattr -dr com.apple.quarantine /Applications/cardwall.app`
 - **Windows** (x64) installer (`.exe`, assisted, no admin needed) + a portable `.zip`
