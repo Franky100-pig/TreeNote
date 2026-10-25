@@ -7,9 +7,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
 const bridge = require('../renderer/web-bridge.js');
+const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 function makeWorld() {
   const win = {};
@@ -185,6 +189,88 @@ test('web-bridge: card colours survive save -> open', async () => {
   const opened = await win.cardwall.openBoard(created.id);
   assert.equal(opened.cards[0].color, 'sky');
   assert.equal(opened.cards[1].color, null);
+});
+
+test('web-bridge: colour sanitisation boundary cases', () => {
+  // The whitelist is the only thing standing between a hand-edited board
+  // file and the DOM. Everything that is not exactly one of the six preset
+  // names must land on null (the default panel) — including near misses
+  // that a looser check would let through.
+  const cases = [
+    ['rose', 'rose'],                    // on the whitelist -> kept
+    ['amber', 'amber'],
+    ['violet', 'violet'],
+    ['rose ', null],                     // trailing space is NOT the name
+    [' rose', null],                     // leading space either
+    ['ROSE', null],                      // case-sensitive
+    ['Rose', null],
+    ['', null],                          // empty string
+    [' ', null],
+    [null, null],                        // explicit null
+    [undefined, null],                   // absent
+    [{}, null],                          // object
+    [[], null],                          // array
+    [42, null],                          // number
+    [true, null],                        // boolean
+    ['__proto__', null],                 // prototype-pollution attempt
+    ['constructor', null],               // inherited property
+    ['toString', null],
+    ['rose".red', null],                 // CSS-injection attempt
+    ['rose; background:url(x)', null],
+    ['javascript:alert(1)', null],
+    ['x'.repeat(500), null]              // absurdly long
+  ];
+  const cards = cases.map(([value], i) => ({ id: 'c' + i, color: value }));
+  const clean = bridge.sanitizeBoard({ cards });
+  assert.equal(clean.cards.length, cases.length, 'no card is dropped over colour');
+  cases.forEach(([value, expected], i) => {
+    assert.equal(clean.cards[i].color, expected,
+      `colour ${JSON.stringify(value)} -> ${expected}`);
+  });
+});
+
+test('web-bridge: a colour never leaks the other card fields', () => {
+  // The sanitiser builds a fresh object per card; the colour must not be
+  // able to smuggle extra properties through.
+  const clean = bridge.sanitizeBoard({
+    cards: [{ id: 'x', title: 'T', color: 'mint', evil: 'nope', __proto__: { p: 1 } }]
+  });
+  assert.equal(clean.cards[0].color, 'mint');
+  assert.equal(clean.cards[0].evil, undefined, 'unknown fields are dropped');
+  assert.equal(Object.prototype.hasOwnProperty.call(clean.cards[0], 'evil'), false);
+  assert.equal(Object.prototype.polluted, undefined, 'no prototype pollution');
+});
+
+test('web-bridge: the card cap holds and colours survive it', () => {
+  const cards = [];
+  for (let i = 0; i < 5002; i++) {
+    cards.push({ id: 'k' + i, color: i % 2 === 0 ? 'mint' : 'sky' });
+  }
+  const clean = bridge.sanitizeBoard({ cards });
+  assert.equal(clean.cards.length, 5000, 'MAX_CARDS cap enforced');
+  assert.equal(clean.cards[0].id, 'k0');
+  assert.equal(clean.cards[4999].id, 'k4999', 'the FIRST 5000 survive');
+  assert.equal(clean.cards[4999].color, 'sky', 'colours survive the cap');
+});
+
+test('contract: main.js and the web twin share one colour whitelist', () => {
+  // The two sanitizers must never drift: a board written by the desktop
+  // build is read back by the web build (and vice versa). A divergence
+  // would mean a colour the desktop accepts but the web silently drops
+  // (or worse: one side accepting a value the other treats as junk).
+  const mainSrc = readFileSync(path.join(root, 'main.js'), 'utf8');
+  const bridgeSrc = readFileSync(path.join(root, 'renderer', 'web-bridge.js'), 'utf8');
+  const pick = (src) => {
+    const m = src.match(/CARD_COLORS\s*=\s*\[([^\]]*)\]/);
+    assert.ok(m, 'CARD_COLORS list found');
+    return m[1].split(',').map((s) => s.trim().replace(/^['"]|['"]$/g, '')).filter(Boolean);
+  };
+  const expected = ['amber', 'rose', 'sky', 'mint', 'violet', 'lime'];
+  assert.deepEqual(pick(mainSrc), expected, 'main.js whitelist');
+  assert.deepEqual(pick(bridgeSrc), expected, 'web-bridge whitelist');
+  // Both sides must also normalise the same way, not just list the same names.
+  assert.match(mainSrc, /function cleanColor\(c\)/, 'main.js normalises the colour');
+  assert.match(bridgeSrc, /function cleanColor\(c\)/, 'the web twin normalises it too');
 });
 
 test('web-bridge: listBoards sorts most-recently-saved first', async () => {
