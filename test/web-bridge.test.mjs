@@ -324,3 +324,94 @@ test('web-bridge: a card save never un-pins the board (mirrors main.js)', async 
   // saveBoard legitimately does, that is a separate action.
   assert.ok(after.savedAt >= savedAtBefore);
 });
+
+test('web-bridge: pinning boundary cases', async () => {
+  const { win } = makeWorld();
+  const a = await win.cardwall.createBoard('A');
+  await new Promise((r) => setTimeout(r, 5));
+  const b = await win.cardwall.createBoard('B'); // B is the newer board
+
+  // Ids are SANITISED, not rejected: safeId strips everything outside
+  // [A-Za-z0-9_-] and truncates to 40 chars, then the lookup happens. So an
+  // id that sanitises to nothing is an invalid id, while an id that
+  // sanitises to something well-formed but unknown is simply "not found".
+  for (const bad of ['', null, undefined, '!!!', '   ']) {
+    assert.deepEqual(await win.cardwall.pinBoard(bad, true), { ok: false, error: 'invalid id' },
+      `id ${JSON.stringify(bad)} sanitises to nothing`);
+  }
+  for (const unknown of ['bad id!', 'x'.repeat(200), 'no-such-board']) {
+    assert.deepEqual(await win.cardwall.pinBoard(unknown, true), { ok: false, error: 'not found' },
+      `id ${JSON.stringify(unknown)} is well-formed but unknown`);
+  }
+
+  // Pinning twice is idempotent, and the OLDER board jumps above the newer one.
+  assert.deepEqual(await win.cardwall.pinBoard(a.id, true), { ok: true, pinned: true });
+  assert.deepEqual(await win.cardwall.pinBoard(a.id, true), { ok: true, pinned: true });
+  let list = await win.cardwall.listBoards();
+  assert.equal(list[0].id, a.id, 'the pinned board floats to the top');
+  assert.equal(list[1].id, b.id);
+
+  // Unpinning restores plain recency (B is newer).
+  assert.deepEqual(await win.cardwall.pinBoard(a.id, false), { ok: true, pinned: false });
+  list = await win.cardwall.listBoards();
+  assert.equal(list[0].id, b.id);
+  assert.equal(list[1].id, a.id);
+  assert.equal(list.find((x) => x.id === a.id).pinned, false);
+
+  // Unpinning something that was never pinned is a no-op, not an error.
+  assert.deepEqual(await win.cardwall.pinBoard(b.id, false), { ok: true, pinned: false });
+  assert.equal((await win.cardwall.listBoards()).find((x) => x.id === b.id).pinned, false);
+
+  // Renaming a pinned board keeps the pin (the flag lives on the board).
+  await win.cardwall.pinBoard(a.id, true);
+  await win.cardwall.renameBoard(a.id, 'A renamed');
+  assert.equal((await win.cardwall.listBoards()).find((x) => x.id === a.id).pinned, true);
+
+  // A deleted board leaves no pin behind.
+  await win.cardwall.pinBoard(b.id, true);
+  await win.cardwall.deleteBoard(b.id);
+  assert.equal((await win.cardwall.listBoards()).find((x) => x.id === b.id), undefined);
+});
+
+test('web-bridge: a mangled id still addresses its board (sanitised lookup)', async () => {
+  // Documented consequence of sanitising ids instead of rejecting them:
+  // inserting an illegal character in the middle resolves back to the same
+  // board. Every handler in the API behaves this way (rename / delete
+  // included), so the pin must not be the odd one out.
+  const { win } = makeWorld();
+  const board = await win.cardwall.createBoard('B');
+  const mangled = board.id.slice(0, 3) + '!' + board.id.slice(3);
+  assert.notEqual(mangled, board.id, 'the id really is mangled');
+  const r = await win.cardwall.pinBoard(mangled, true);
+  assert.deepEqual(r, { ok: true, pinned: true });
+  const list = await win.cardwall.listBoards();
+  assert.equal(list[0].id, board.id);
+  assert.equal(list[0].pinned, true);
+});
+
+test('web-bridge: several pinned boards keep recency among themselves', async () => {
+  const { win } = makeWorld();
+  const a = await win.cardwall.createBoard('A');
+  await new Promise((r) => setTimeout(r, 5));
+  const b = await win.cardwall.createBoard('B');
+  await new Promise((r) => setTimeout(r, 5));
+  const c = await win.cardwall.createBoard('C'); // C is the newest
+  await win.cardwall.pinBoard(a.id, true);
+  await win.cardwall.pinBoard(c.id, true);
+  const list = await win.cardwall.listBoards();
+  // Pinned group first (newest within it), then the unpinned ones.
+  assert.deepEqual(list.map((x) => x.id), [c.id, a.id, b.id]);
+  assert.deepEqual(list.map((x) => x.pinned), [true, true, false]);
+});
+
+test('web-bridge: a pin survives a full save -> open -> save cycle', async () => {
+  const { win } = makeWorld();
+  const created = await win.cardwall.createBoard('A');
+  await win.cardwall.pinBoard(created.id, true);
+  // open returns the board contents; the pin is a library-level flag and
+  // must not be part of (or lost by) the card payload round trip.
+  const opened = await win.cardwall.openBoard(created.id);
+  assert.equal(opened.pinned, undefined, 'the pin is not a card property');
+  await win.cardwall.saveBoard(created.id, { cards: [{ id: 'x', title: 't' }] });
+  assert.equal((await win.cardwall.listBoards())[0].pinned, true);
+});
