@@ -144,7 +144,7 @@ v0.7 起顶栏做了减法：只留「一键整洁」「返回首页」和右上
 ```bash
 npm install
 npm start          # 正常启动
-npm test           # 单测：物理引擎 14 项 + web 存储垫片 11 项 + PWA 契约 7 项
+npm test           # 单测 53 项：物理引擎 14 + web 存储垫片 22 + 主题首帧 10 + PWA 契约 7
 npm run smoke      # 十二层自检：渲染 / 相机 / 调试 / 主题 / 交互 / 编辑 / 操作条 / 使用指南 / 存盘 / 首页 / 读盘 / 相机恢复
 npm run dist       # 打包 macOS dmg → dist/cardwall-<version>-arm64.dmg
 npm run dist:win   # 打包 Windows 安装包 + zip（nsis；本机无 wine 时走 CI）
@@ -192,7 +192,9 @@ renderer/debug.js       F3 叠加
 renderer/sample.js      首次启动的示例树
 build/icon.svg          图标源文件；build/icon.icns / build/icon.ico 由它栅格化生成
 test/physics.test.mjs   14 项单测
-test/web-bridge.test.mjs 11 项单测（含「刷新即忘 / 不碰存储后端」契约）
+test/web-bridge.test.mjs 22 项单测（含「刷新即忘 / 不碰存储后端」契约、颜色白名单边界、双侧锁步、置顶边界）
+test/theme-boot.test.mjs 10 项单测（首帧主题解析：白名单 / auto 解析 / 网页版不读存储 / 存储异常降级）
+test/pwa.test.mjs       7 项单测（manifest / service worker 硬化 / 构建注入契约）
 ```
 
 主题全走 `styles.css` 顶部的语义 token（`--bg` / `--surface` / `--ink` / `--edge` …），一套 token 定义就是一种主题：`:root` 是默认深色（纯黑画布），`[data-theme="light"]` 覆盖同一组 token 得到纸感浅色。想加第三套主题，复制一份 token 块 + 在 `applyTheme` 里多认一个名字即可，不用碰任何组件样式。

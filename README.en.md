@@ -140,7 +140,7 @@ Auto-layout is deterministic, not a random initial guess. Quiet cards **fall asl
 ```bash
 npm install
 npm start          # normal launch
-npm test           # unit tests: physics (14) + web storage bridge (11) + PWA contract (7)
+npm test           # unit tests 53: physics (14) + web storage bridge (22) + theme first-paint (10) + PWA contract (7)
 npm run smoke      # twelve-layer self-check: render / camera / debug / theme / interaction / editor / toolbar / guidance / persist / home / load / camera-restore
 npm run dist       # package the macOS dmg → dist/cardwall-<version>-arm64.dmg
 npm run dist:win   # package the Windows installer + zip (nsis; use CI when no local wine)
@@ -188,6 +188,9 @@ renderer/debug.js       F3 overlay
 renderer/sample.js      The sample tree shown on first launch
 build/icon.svg          Icon source; build/icon.icns is rasterised from it
 test/physics.test.mjs   14 unit tests
+test/web-bridge.test.mjs 22 unit tests (memory-less contract, colour whitelist boundaries, two-sided lockstep, pinning boundaries)
+test/theme-boot.test.mjs 10 unit tests (first-paint theme resolution: whitelist / auto / web keeps nothing / storage failures)
+test/pwa.test.mjs       7 unit tests (manifest / service-worker hardening / build-injection contract)
 ```
 
 Every colour comes from the semantic tokens at the top of `styles.css` (`--bg` / `--surface` / `--ink` / `--edge` …), so one token block *is* a theme: `:root` is the default dark (pure black canvas) and `[data-theme="light"]` overrides the same tokens for the paper-light look. To add a third theme, copy a token block and teach `applyTheme` one more name — no component styles need to change.
