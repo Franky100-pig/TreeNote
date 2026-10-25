@@ -1,6 +1,6 @@
 {
   "name": "cardwall",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "力导向整齐树卡片墙笔记工具 — 自由拖拽每个节点、松手不回弹，一键整洁回到标准树；桌面 (macOS/Windows Electron) + 网页双版，手机可触控",
   "main": "main.js",
   "scripts": {

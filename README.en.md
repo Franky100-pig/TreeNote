@@ -60,6 +60,7 @@ Phones get a dedicated pass:
 | Home / open another board | `H`, or click **Home** in the top bar (also available inside Guidance); click any card to open |
 | Rename the current board | Click the board name in Guidance's "Current board" section (or "rename" on a home card) |
 | Edit a card | Hover it → click ✎ on the action bar, **or just double-click** (Escape cancels, Enter commits) |
+| **Card colour** | Hover it → click the **colour dot** on the action bar: six presets (amber / rose / sky / mint / violet / lime), "default" clears it. Colours are saved with the board and tuned per theme for contrast |
 | **New child node** | Hover it → click ＋: a child card fans out **below-right** of this card (never on top of the parent) and opens straight into edit mode |
 | Delete a card | Hover it → click ✕ (or select and press Delete / Backspace) |
 | New card | Double-click empty canvas (attaches to the nearest card within 320px, otherwise it becomes a root) |
@@ -68,7 +69,8 @@ Phones get a dedicated pass:
 | **Free drag** | Drag any node where you like — it **stays where you drop it** (no snap-back) and the wall becomes free-placed; while dragging, the node and its subtree follow the cursor, everything else holds |
 | Pan / zoom | Drag empty canvas / scroll wheel (anchored at the cursor, 0.2–2.5); **touch: pinch with two fingers to zoom, drag two fingers to pan** |
 | Debug overlay | `F3` or `Cmd+Shift+D`: fps, card count, sim time, scale, peak speed, mechanical energy, tree target, velocity vectors |
-| Toggle theme | `Cmd/Ctrl+Shift+L`: black canvas ⇄ paper-light; the choice is remembered (desktop only — the web edition forgets on reload) |
+| Toggle theme | `Cmd/Ctrl+Shift+L`: black canvas ⇄ paper-light ⇄ **follow system** (auto tracks macOS light/dark live); the mode is remembered (desktop only — the web edition forgets on reload) |
+| **Pin a board** | In the library, click **置顶/pin** on a card: favourites float to the top of the list regardless of recency (desktop only) |
 
 The **Guidance** panel floats above the canvas while blurring and locking the board behind it:
 
