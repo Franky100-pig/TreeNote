@@ -1993,14 +1993,31 @@
       tidyBtnEl.textContent === '整理中…' &&
       world.tidy === true;
 
+    // 导出 PDF button: must be a real, clickable button sitting to the LEFT of
+    // Guidance. The toolbar is pointer-events:none, so the control has to opt
+    // back in — otherwise clicks fall through to the canvas and nothing
+    // happens (the regression this check guards against).
+    var exportBtnEl = document.getElementById('export-pdf-btn');
+    var guidanceBtnEl = document.getElementById('guidance-btn');
+    var exportTagOk = !!exportBtnEl && exportBtnEl.tagName === 'BUTTON';
+    var exportClickable = !!exportBtnEl &&
+      getComputedStyle(exportBtnEl).pointerEvents === 'auto';
+    var exportLeftOfGuidance = !!exportBtnEl && !!guidanceBtnEl &&
+      (exportBtnEl.compareDocumentPosition(guidanceBtnEl) &
+        Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+
     return {
-      ok: hasBar && editOk && addOk && delOk && tidyFeedback && colorOk,
+      ok: hasBar && editOk && addOk && delOk && tidyFeedback && colorOk &&
+        exportTagOk && exportClickable && exportLeftOfGuidance,
       hasBar: hasBar,
       editOk: editOk,
       addOk: addOk,
       delOk: delOk,
       colorOk: colorOk,
-      tidyFeedback: tidyFeedback
+      tidyFeedback: tidyFeedback,
+      exportTagOk: exportTagOk,
+      exportClickable: exportClickable,
+      exportLeftOfGuidance: exportLeftOfGuidance
     };
   };
 
