@@ -63,6 +63,12 @@
 
   // Mirrors main.js sanitizeBoard: untrusted JSON must never crash the app.
   // `tidy` rides along when present (a board saved while free reopens free).
+  var CARD_COLORS = ['amber', 'rose', 'sky', 'mint', 'violet', 'lime'];
+
+  function cleanColor(c) {
+    return CARD_COLORS.indexOf(c) >= 0 ? c : null;
+  }
+
   function sanitizeBoard(data) {
     var raw = data && Array.isArray(data.cards) ? data.cards.slice(0, MAX_CARDS) : [];
     var ids = {};
@@ -77,7 +83,9 @@
         note: String(c.note == null ? '' : c.note).slice(0, MAX_NOTE),
         x: Number.isFinite(c.x) ? c.x : 0,
         y: Number.isFinite(c.y) ? c.y : 0,
-        parent: null
+        parent: null,
+        // Optional preset colour (whitelist, same as main.js); else null.
+        color: cleanColor(c.color)
       });
     }
     // Second pass: parents may be declared after their children.
@@ -117,11 +125,13 @@
             id: id,
             name: cleanName(b.name),
             cards: Array.isArray(b.cards) ? b.cards.length : 0,
-            savedAt: b.savedAt || null
+            savedAt: b.savedAt || null,
+            pinned: b.pinned === true
           };
         }).filter(function (b) { return !!b.id; })
-          // Most recently touched first (matches main.js).
+          // Pinned first, then most recently touched (matches main.js).
           .sort(function (a, b) {
+            if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
             return String(b.savedAt || '').localeCompare(String(a.savedAt || ''));
           }));
       },
@@ -158,6 +168,8 @@
         var savedAt = new Date().toISOString();
         var next = { version: 1, name: name, savedAt: savedAt, cards: clean.cards };
         if (clean.tidy !== undefined) next.tidy = clean.tidy;
+        // A card save must never un-favourite the board (same rule as main.js).
+        if (previous && previous.pinned === true) next.pinned = true;
         boards[safe] = next;
         if (order.indexOf(safe) < 0) order.push(safe);
         return Promise.resolve({ ok: true, cards: clean.cards.length, name: name });
@@ -172,6 +184,20 @@
         board.name = next;
         board.savedAt = new Date().toISOString();
         return Promise.resolve({ ok: true, name: next });
+      },
+
+      // Favourite / pin: floats a board to the top of the library. Mirrors the
+      // desktop handler exactly, including "unpin deletes the flag" and
+      // "savedAt is untouched" (recency order stays undisturbed).
+      pinBoard: function (id, pinned) {
+        var safe = safeId(id);
+        if (!safe) return Promise.resolve({ ok: false, error: 'invalid id' });
+        var board = boards[safe];
+        if (!board) return Promise.resolve({ ok: false, error: 'not found' });
+        var next = pinned === true;
+        if (next) board.pinned = true;
+        else delete board.pinned;
+        return Promise.resolve({ ok: true, pinned: next });
       },
 
       // The desktop build moves the file to the OS trash; the web build has

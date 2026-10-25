@@ -30,6 +30,23 @@
   var dialogCancel = document.getElementById('dialog-cancel');
 
   // ---- world setup -------------------------------------------------------
+  // Preset card colours — a whitelist, so a hand-edited board file can never
+  // inject an arbitrary value into the DOM (main.js sanitises to the same
+  // list). `null` means "no colour": the default panel.
+  var CARD_COLORS = ['amber', 'rose', 'sky', 'mint', 'violet', 'lime'];
+  var CARD_COLOR_LABELS = {
+    amber: '琥珀', rose: '玫红', sky: '天蓝',
+    mint: '薄荷', violet: '紫罗兰', lime: '青柠'
+  };
+
+  // Theme modes (v0.9): dark -> light -> auto -> dark. 'auto' follows the OS
+  // (prefers-color-scheme) live. The helpers that read these live in the
+  // theme section further down; this early definition is what makes them
+  // callable from the toolbar wiring below (function declarations hoist, but
+  // a `var` read before its assignment line is still undefined).
+  var THEME_KEY = 'cardwall.theme';
+  var THEME_MODES = ['dark', 'light', 'auto'];
+
   var world = CardPhysics.createWorld({ seed: 7 });
   var cardEls = new Map(); // id -> HTMLElement
   var edgeEls = new Map(); // childId -> SVGPathElement
@@ -43,7 +60,8 @@
         y: item.y,
         parent: item.parent || null,
         title: item.title,
-        note: item.note || ''
+        note: item.note || '',
+        color: item.color || null
       });
     });
   }
@@ -55,6 +73,9 @@
     var el = document.createElement('div');
     el.className = 'card' + (card.parent ? '' : ' card-root');
     el.dataset.id = card.id;
+    // Preset colour (null = default panel). The pigments live in CSS so both
+    // themes stay in control of contrast; the data attribute is the hook.
+    if (card.color) el.dataset.color = card.color;
     var title = document.createElement('div');
     title.className = 'card-title';
     title.textContent = card.title;
@@ -66,16 +87,30 @@
     el.appendChild(title);
     el.appendChild(note);
 
-    // Hover action bar: edit / add child / delete. Appears on hover (CSS)
-    // and is the main way to act on a card without dragging it. The buttons
-    // are handled by a delegated click listener on the viewport; this is
-    // just the markup. `tabindex=-1` keeps them out of the tab order so the
-    // card body stays the keyboard target while editing.
+    // Hover action bar: edit / add child / delete, plus the colour swatches
+    // (the palette opens as a small popover). Appears on hover (CSS) and is
+    // the main way to act on a card without dragging it. The buttons are
+    // handled by a delegated click listener on the viewport; this is just the
+    // markup. `tabindex=-1` keeps them out of the tab order so the card body
+    // stays the keyboard target while editing.
     var toolbar = document.createElement('div');
     toolbar.className = 'card-toolbar';
     toolbar.innerHTML =
       '<button data-act="edit" title="编辑 (或双击卡片)" tabindex="-1" aria-label="编辑">✎</button>' +
       '<button data-act="add" title="新建子节点" tabindex="-1" aria-label="新建子节点">＋</button>' +
+      '<span class="card-color-wrap">' +
+        '<button data-act="color" class="card-color-btn" title="卡片颜色" tabindex="-1" aria-label="卡片颜色"></button>' +
+        '<span class="card-palette" hidden>' +
+          CARD_COLORS.map(function (name) {
+            return '<button data-act="color" data-color="' + name + '" ' +
+              'class="card-swatch" data-swatch="' + name + '" ' +
+              'title="' + CARD_COLOR_LABELS[name] + '" tabindex="-1" ' +
+              'aria-label="' + CARD_COLOR_LABELS[name] + '"></button>';
+          }).join('') +
+          '<button data-act="color" data-color="" class="card-swatch card-swatch-none" ' +
+            'title="默认色" tabindex="-1" aria-label="默认色"></button>' +
+        '</span>' +
+      '</span>' +
       '<button data-act="del" title="删除节点" tabindex="-1" aria-label="删除节点">✕</button>';
     el.appendChild(toolbar);
 
@@ -203,7 +238,8 @@
           note: c.note,
           x: c.x,
           y: c.y,
-          parent: c.parent || null
+          parent: c.parent || null,
+          color: c.color || null
         };
       })
     };
@@ -566,13 +602,13 @@
 
   function homeCard(board) {
     var card = document.createElement('div');
-    card.className = 'home-card' + (board.id === currentBoard.id ? ' current' : '');
+    card.className = 'home-card' + (board.id === currentBoard.id ? ' current' : '') + (board.pinned ? ' pinned' : '');
     card.setAttribute('role', 'listitem');
     card.dataset.id = board.id;
 
     var title = document.createElement('div');
     title.className = 'home-card-name';
-    title.textContent = board.name;
+    title.textContent = (board.pinned ? '📌 ' : '') + board.name;
 
     var meta = document.createElement('div');
     meta.className = 'home-card-meta';
@@ -580,6 +616,11 @@
 
     var actions = document.createElement('div');
     actions.className = 'home-card-actions';
+    var pin = document.createElement('button');
+    pin.type = 'button';
+    pin.dataset.act = 'pin';
+    pin.textContent = board.pinned ? '取消置顶' : '置顶';
+    pin.title = board.pinned ? '从置顶区移除' : '置顶到图库最前面';
     var rename = document.createElement('button');
     rename.type = 'button';
     rename.dataset.act = 'rename';
@@ -588,6 +629,7 @@
     del.type = 'button';
     del.dataset.act = 'delete';
     del.textContent = '删除';
+    actions.appendChild(pin);
     actions.appendChild(rename);
     actions.appendChild(del);
 
@@ -599,7 +641,9 @@
     card.addEventListener('click', function (e) {
       var btn = e.target.closest ? e.target.closest('button') : null;
       if (btn) {
-        if (btn.dataset.act === 'rename') {
+        if (btn.dataset.act === 'pin') {
+          togglePinById(board.id, !board.pinned);
+        } else if (btn.dataset.act === 'rename') {
           renameBoardById(board.id, board.name);
         } else if (btn.dataset.act === 'delete') {
           deleteBoardById(board.id);
@@ -609,6 +653,19 @@
       openBoardById(board.id);
     });
     return card;
+  }
+
+  // Favourite / pin toggle. The pin is a library-level flag, so unlike a card
+  // save it does not need the board open — the handler reads and writes the
+  // file directly. Unsupported bridges (none today) degrade to a no-op.
+  function togglePinById(id, pinned) {
+    if (!window.cardwall || typeof window.cardwall.pinBoard !== 'function') {
+      return Promise.resolve(null);
+    }
+    return window.cardwall.pinBoard(id, pinned).then(function (r) {
+      renderHome(); // re-sort: pinned boards float to the top
+      return r;
+    });
   }
 
   function openBoardById(id) {
@@ -782,7 +839,25 @@
   var guidanceNew = document.getElementById('guidance-new');
   if (guidanceNew) guidanceNew.addEventListener('click', function () { closeGuidance(); newBoardBtn.click(); });
   var guidanceTheme = document.getElementById('guidance-theme');
-  if (guidanceTheme) guidanceTheme.addEventListener('click', function () { toggleTheme(); });
+  if (guidanceTheme) {
+    // The label names the NEXT mode (what the press will switch to), so the
+    // three-state cycle is visible without a manual.
+    var THEME_NEXT_LABEL = { dark: '浅色', light: '跟随系统', auto: '深色' };
+    function refreshThemeButton() {
+      var next = THEME_MODES[(THEME_MODES.indexOf(themeMode()) + 1) % THEME_MODES.length];
+      guidanceTheme.textContent = '切换主题 → ' + THEME_NEXT_LABEL[next];
+    }
+    guidanceTheme.addEventListener('click', function () {
+      toggleTheme();
+      refreshThemeButton();
+    });
+    refreshThemeButton();
+    // Keep the label honest when the OS flip re-renders an 'auto' board.
+    if (window.matchMedia) {
+      var mq = window.matchMedia('(prefers-color-scheme: light)');
+      if (mq.addEventListener) mq.addEventListener('change', refreshThemeButton);
+    }
+  }
 
   // Web (touch) build: the guide list is written for a mouse, so append the
   // gestures that only exist on a touchscreen.
@@ -1054,8 +1129,38 @@
     syncDOM();
   }
 
+  // ---- card colours --------------------------------------------------------
+  // Apply a preset colour (or null for the default panel) to one card and
+  // persist it with the next board save. The value is whitelisted by both
+  // sanitizers, so even a corrupt file can only ever land on the palette.
+  function setCardColor(id, color) {
+    var card = CardPhysics.findCard(world, id);
+    if (!card) return;
+    var next = CARD_COLORS.indexOf(color) >= 0 ? color : null;
+    if (card.color === next) return;
+    card.color = next;
+    var el = cardEls.get(id);
+    if (el) {
+      if (next) el.dataset.color = next;
+      else delete el.dataset.color;
+    }
+    markDirty();
+    syncDOM();
+  }
+
+  // The palette is a hover popover inside the action bar; only one may be
+  // open at a time. Clicking the swatch button opens it; clicking anywhere
+  // else (viewport pointerdown, a colour pick, Esc) closes it.
+  function closeAllPalettes() {
+    var open = document.querySelectorAll('.card-palette:not([hidden])');
+    for (var i = 0; i < open.length; i++) open[i].hidden = true;
+  }
+
   // Selection on pointerdown; committing an open editor when clicking away.
   viewport.addEventListener('pointerdown', function (e) {
+    // Any press outside an open palette dismisses it (the swatch click itself
+    // is handled by the click listener below, which runs after pointerdown).
+    if (!(e.target.closest && e.target.closest('.card-color-wrap'))) closeAllPalettes();
     var cardEl = e.target.closest ? e.target.closest('.card') : null;
     if (editingId && (!cardEl || cardEl.dataset.id !== editingId)) commitEdit();
     select(cardEl ? cardEl.dataset.id : null);
@@ -1104,6 +1209,18 @@
       // "child overwrites the node it hangs from" bug cannot recur), then
       // opens it straight into edit mode.
       createCard(null, card.id);
+    } else if (act === 'color') {
+      // The swatch button (no data-color) toggles this card's palette; a
+      // swatch inside it applies that colour (empty string = default).
+      var palette = btn.parentNode ? btn.parentNode.querySelector('.card-palette') : null;
+      if (palette && !btn.classList.contains('card-swatch')) {
+        var wasHidden = palette.hidden;
+        closeAllPalettes();
+        palette.hidden = !wasHidden;
+        return;
+      }
+      closeAllPalettes();
+      setCardColor(card.id, btn.dataset.color || null);
     } else if (act === 'del') {
       deleteCard(card.id);
     }
@@ -1139,31 +1256,63 @@
   });
 
   // ---- theme ---------------------------------------------------------------
-  // Dark is the default. Cmd/Ctrl+Shift+L flips to the paper theme and the
-  // choice is remembered across launches on the DESKTOP build (index.html
-  // applies it before the first paint so a light board does not flash black
-  // on boot). The web edition remembers nothing — not even the theme.
-  var THEME_KEY = 'cardwall.theme';
+  // Dark is the default. Cmd/Ctrl+Shift+L cycles dark -> light -> auto, where
+  // auto follows the OS (prefers-color-scheme) live. The chosen mode is
+  // remembered across launches on the DESKTOP build (index.html applies it
+  // before the first paint so a light board does not flash black on boot).
+  // The web edition remembers nothing — not even the theme.
   var isWebPlatform = !!(window.cardwall && window.cardwall.platform === 'web');
 
-  function currentTheme() {
-    return document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
+  function storedTheme() {
+    try {
+      var v = localStorage.getItem(THEME_KEY);
+      return THEME_MODES.indexOf(v) >= 0 ? v : 'dark';
+    } catch (err) { return 'dark'; }
   }
 
-  function applyTheme(name) {
-    if (name === 'light') {
+  function systemPrefersLight() {
+    return !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches);
+  }
+
+  // The stored MODE ('dark' | 'light' | 'auto'), not the rendered theme.
+  function themeMode() {
+    return isWebPlatform ? 'dark' : storedTheme();
+  }
+
+  // What the canvas actually looks like right now.
+  function currentTheme() {
+    if (themeMode() === 'auto') return systemPrefersLight() ? 'light' : 'dark';
+    return themeMode() === 'light' ? 'light' : 'dark';
+  }
+
+  function applyThemeMode(mode) {
+    var resolved = mode === 'auto' ? (systemPrefersLight() ? 'light' : 'dark') : mode;
+    if (resolved === 'light') {
       document.documentElement.dataset.theme = 'light';
     } else {
       delete document.documentElement.dataset.theme;
     }
     if (isWebPlatform) return; // the browser keeps nothing
     try {
-      localStorage.setItem(THEME_KEY, name);
+      localStorage.setItem(THEME_KEY, mode);
     } catch (err) { /* storage unavailable — the theme just won't persist */ }
   }
 
   function toggleTheme() {
-    applyTheme(currentTheme() === 'dark' ? 'light' : 'dark');
+    // dark -> light -> auto -> dark …
+    var next = THEME_MODES[(THEME_MODES.indexOf(themeMode()) + 1) % THEME_MODES.length];
+    applyThemeMode(next);
+  }
+
+  // While the mode is 'auto', the OS flipping between light and dark must
+  // re-render the canvas immediately (no reload, no mode change on disk).
+  if (window.matchMedia) {
+    var themeMQ = window.matchMedia('(prefers-color-scheme: light)');
+    if (themeMQ.addEventListener) {
+      themeMQ.addEventListener('change', function () {
+        if (themeMode() === 'auto') applyThemeMode('auto');
+      });
+    }
   }
 
   window.addEventListener('keydown', function (e) {
@@ -1207,6 +1356,7 @@
       e.preventDefault();
       tidyAll();
     } else if (e.key === 'Escape' && selectedId) {
+      closeAllPalettes();
       select(null);
     }
   });
@@ -1224,11 +1374,14 @@
 
   // Theme round trip through the real key handler, so smoke exercises the
   // shortcut rather than a private function, and leaves the board on dark.
+  // The cycle is dark -> light -> auto -> dark; 'auto' resolves through the
+  // OS preference, which in the headless runner is dark (no light query).
   window.__cardwallThemeCheck = function () {
     function probe() {
       var card = document.querySelector('.card');
       return {
         theme: currentTheme(),
+        mode: themeMode(),
         bg: getComputedStyle(document.body).backgroundColor,
         ink: getComputedStyle(document.body).color,
         cardBg: card ? getComputedStyle(card).backgroundColor : null
@@ -1239,24 +1392,28 @@
         key: 'L', metaKey: true, shiftKey: true, bubbles: true, cancelable: true
       }));
     }
-    // Start from a known state: a previous session may have left the light
-    // theme stored, which would otherwise make this check environment-dependent.
-    applyTheme('dark');
+    // Start from a known state: a previous session may have left another mode
+    // stored, which would otherwise make this check environment-dependent.
+    applyThemeMode('dark');
     var start = probe();
     press();
     var flipped = probe();
+    press();
+    var auto = probe();
     press();
     var back = probe();
     var stored = null;
     try { stored = localStorage.getItem(THEME_KEY); } catch (err) { stored = null; }
     var BLACK = 'rgb(0, 0, 0)';
     return {
-      ok: start.theme === 'dark' && start.bg === BLACK &&
-        flipped.theme === 'light' && flipped.bg !== BLACK && flipped.cardBg === 'rgb(255, 255, 255)' &&
-        back.theme === 'dark' && back.bg === BLACK &&
+      ok: start.mode === 'dark' && start.theme === 'dark' && start.bg === BLACK &&
+        flipped.mode === 'light' && flipped.theme === 'light' && flipped.bg !== BLACK && flipped.cardBg === 'rgb(255, 255, 255)' &&
+        auto.mode === 'auto' && auto.theme === 'dark' && auto.bg === BLACK &&
+        back.mode === 'dark' && back.theme === 'dark' && back.bg === BLACK &&
         stored === 'dark',
       start: start,
       flipped: flipped,
+      auto: auto,
       back: back,
       stored: stored
     };
@@ -1688,18 +1845,25 @@
     if (!rootEl) return { ok: false, reason: 'no card' };
     var rootId = rootEl.dataset.id;
     var bar = rootEl.querySelector('.card-toolbar');
-    var btns = bar ? bar.querySelectorAll('button') : [];
-    var hasBar = !!bar && btns.length === 3;
+    // The bar carries the three action buttons plus the colour entry (the
+    // palette itself is a hidden popover whose swatches only exist once
+    // opened). Assert the ACTIONS, not a raw button count: the palette is
+    // data-driven markup and its size is an implementation detail.
+    var editBtn = bar ? bar.querySelector('[data-act="edit"]') : null;
+    var addBtn = bar ? bar.querySelector('[data-act="add"]') : null;
+    var delBtn = bar ? bar.querySelector('[data-act="del"]') : null;
+    var colorBtn = bar ? bar.querySelector('.card-color-btn') : null;
+    var hasBar = !!bar && !!editBtn && !!addBtn && !!delBtn && !!colorBtn;
 
     // edit button -> enters edit mode on the same card
     if (editingId) cancelEdit();
-    click(bar.querySelector('[data-act="edit"]'));
+    click(editBtn);
     var editOk = editingId === rootId;
     cancelEdit();
 
     // add button -> creates a child of this card, opened in edit mode
     var idsBefore = world.cards.map(function (c) { return c.id; });
-    click(bar.querySelector('[data-act="add"]'));
+    click(addBtn);
     var newId = world.cards.map(function (c) { return c.id; })
       .filter(function (id) { return idsBefore.indexOf(id) < 0; })[0];
     var addOk = !!newId && CardPhysics.findCard(world, newId).parent === rootId;
@@ -1711,6 +1875,41 @@
     var delOk = !!childEl && world.cards.length === idsBefore.length &&
       !cardEls.has(newId) && !edgeEls.has(newId);
 
+    // colour swatch -> applies a preset to the card (data attribute + model),
+    // and the "no colour" swatch clears it again. The palette is opened
+    // through the real delegated click path, exactly like a user would.
+    // colour swatch -> applies a preset to the card (data attribute + model),
+    // and the "no colour" swatch clears it again. The palette is opened
+    // through the real delegated click path, exactly like a user would.
+    // NOTE: this runs on rootEl, not the child above — that card was just
+    // deleted (el.remove()), and a click on a detached node never bubbles
+    // to the viewport's delegated listener.
+    var colorOk = false;
+    var rootColorBtn = rootEl.querySelector('.card-color-btn');
+    if (rootColorBtn) {
+      click(rootColorBtn);
+      var palette = rootEl.querySelector('.card-palette');
+      var paletteOpen = !!palette && !palette.hidden;
+      var swatch = palette ? palette.querySelector('[data-color="rose"]') : null;
+      if (paletteOpen && swatch) {
+        click(swatch);
+        var painted = CardPhysics.findCard(world, rootId);
+        colorOk = !!painted && painted.color === 'rose' &&
+          rootEl.dataset.color === 'rose' && palette.hidden;
+      }
+      // clear back to the default panel
+      var noneBtn = rootEl.querySelector('.card-palette [data-color=""]');
+      if (noneBtn) {
+        click(rootColorBtn);
+        click(noneBtn);
+        var cleared = CardPhysics.findCard(world, rootId);
+        colorOk = colorOk && !!cleared && cleared.color == null &&
+          !('color' in rootEl.dataset);
+      } else {
+        colorOk = false;
+      }
+    }
+
     // 一键整洁: pressing it engages tidy AND gives immediate visual feedback
     // (the tidying pulse class + the transient "整理中…" label).
     var tidyBtnEl = document.getElementById('tidy-btn');
@@ -1721,11 +1920,12 @@
       world.tidy === true;
 
     return {
-      ok: hasBar && editOk && addOk && delOk && tidyFeedback,
+      ok: hasBar && editOk && addOk && delOk && tidyFeedback && colorOk,
       hasBar: hasBar,
       editOk: editOk,
       addOk: addOk,
       delOk: delOk,
+      colorOk: colorOk,
       tidyFeedback: tidyFeedback
     };
   };
