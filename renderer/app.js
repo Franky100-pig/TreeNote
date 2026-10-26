@@ -1127,9 +1127,9 @@
     var themeAttr = document.documentElement.getAttribute('data-theme');
     var themeName = themeAttr === 'light' ? 'light' : 'dark';
     var render = window.CardwallExport.renderBoardToPdf(world.cards, {
-      theme: themeName, title: currentBoard.name
+      theme: themeName, title: currentBoard.name, dpi: 300
     });
-    window.CardwallExport.buildPdfFromCanvas(render, 0.92).then(function (pdfBytes) {
+    window.CardwallExport.buildPdfFromCanvas(render, 0.95).then(function (pdfBytes) {
       var filename = (window.CardwallGeom ? window.CardwallGeom.sanitizeFilename(currentBoard.name) : 'cardwall') + '.pdf';
       if (window.cardwall && typeof window.cardwall.exportPdf === 'function') {
         window.cardwall.exportPdf(filename, pdfBytes);
