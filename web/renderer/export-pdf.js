@@ -188,7 +188,10 @@
     var bbox = CardwallGeom.computeBBox(cards);
     if (!bbox) bbox = { minX: -300, minY: -200, maxX: 300, maxY: 200, w: 600, h: 400 };
     var fit = CardwallGeom.fitPage(bbox, { margin: 36 });
-    var dpi = opts.dpi || 150;
+    // High resolution: 300 DPI keeps card text and bezier edges crisp when the
+    // board is scaled down to fit the page. (The on-screen wall is WYSIWYG — we
+    // only raise the raster density, never change the layout.)
+    var dpi = opts.dpi || 300;
     var scaleToPx = dpi / 72;
     var pxW = Math.max(1, Math.round(fit.pageW * scaleToPx));
     var pxH = Math.max(1, Math.round(fit.pageH * scaleToPx));
@@ -223,10 +226,10 @@
           };
           fr.onerror = function () { reject(fr.error); };
           fr.readAsArrayBuffer(blob);
-        }, 'image/jpeg', quality == null ? 0.92 : quality);
+        }, 'image/jpeg', quality == null ? 0.95 : quality);
       } else {
         // Fallback for very old engines.
-        var dataUrl = canvas.toDataURL('image/jpeg', quality == null ? 0.92 : quality);
+        var dataUrl = canvas.toDataURL('image/jpeg', quality == null ? 0.95 : quality);
         var bin = atob(dataUrl.split(',')[1]);
         var arr = new Uint8Array(bin.length);
         for (var i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
