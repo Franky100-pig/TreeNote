@@ -11,7 +11,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'">
-  <title>cardwall</title>
+  <title>TreeNote</title>
   <!-- web-bridge runs BEFORE theme-boot so the first-paint theme logic can
        tell the platforms apart: under Electron the preload already installed
        window.cardwall; in the browser this shim installs it. The web edition
@@ -23,6 +23,8 @@
 <body>
   <div id="app">
     <header id="toolbar">
+      <span class="brand" aria-hidden="true">TreeNote</span>
+      <span id="save-status" role="status" aria-live="polite"></span>
       <button id="tidy-btn" type="button" title="一键整洁：把整面重新排成标准树（T）" aria-label="一键整洁">一键整洁</button>
       <button id="home-top-btn" type="button" title="返回首页（H）" aria-label="返回首页">返回首页</button>
       <button id="export-pdf-btn" type="button" title="导出 PDF（⌘/Ctrl+E）" aria-label="导出 PDF">导出 PDF</button>
@@ -34,6 +36,21 @@
         <!-- cards injected by renderer/app.js -->
       </div>
     </div>
+
+    <!-- Web-only: the browser keeps nothing. The Guidance note alone was too
+         easy to never see, so the web edition also shows a persistent strip
+         that the visitor can dismiss for the session. -->
+    <div id="web-banner" hidden>
+      <span class="web-banner-text">网页版不保存：刷新或关闭标签页即全部忘记。想记住每一幅图，请下载桌面版。</span>
+      <button id="web-banner-close" type="button" aria-label="关闭提示">✕</button>
+    </div>
+
+    <!-- First-run / near-empty canvas hint; auto-hides on the first action. -->
+    <div id="canvas-hint" hidden>双击空白处新建 · 悬停卡片点 ＋ 加子节点 · 按 T 整理</div>
+
+    <!-- Ephemeral toast (e.g. a web "PDF downloaded" confirmation). -->
+    <div id="toast" role="status" aria-live="polite" hidden></div>
+
     <div id="debug-panel"></div>
 
     <!-- Guidance: collapses the old top-bar clutter into one floating, blurred,
@@ -85,7 +102,7 @@
       <div class="home-inner">
         <header class="home-head">
           <div>
-            <h1>卡片墙</h1>
+            <h1>TreeNote</h1>
             <p class="home-sub">每幅图是独立的一棵树，命名后随时打开</p>
           </div>
           <div class="home-head-actions">

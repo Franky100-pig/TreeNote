@@ -401,7 +401,7 @@ function createWindow() {
     height: 800,
     minWidth: 640,
     minHeight: 480,
-    title: 'cardwall',
+    title: 'TreeNote',
     backgroundColor: '#000000',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -411,7 +411,10 @@ function createWindow() {
     }
   });
 
-  win.loadFile('index.html');
+  // Smoke runs against a fresh temp vault, which looks like a genuine first
+  // run; tag the URL so the renderer skips the first-run Guidance popup and
+  // the automated checks keep looking at an unobstructed board.
+  win.loadFile('index.html', isSmoke ? { query: { smoke: '1' } } : undefined);
 
   if (isSmoke) {
     // `once`: the load-check reloads the window at the end.
