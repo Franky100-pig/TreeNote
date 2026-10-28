@@ -19,7 +19,7 @@
  *                    that a real risk)
  *   - activate     → drop old cache keys, claim clients immediately
  */
-var CACHE = 'cardwall-v2';
+var CACHE = 'cardwall-v3';
 
 var ASSETS = [
   './',
