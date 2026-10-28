@@ -1,8 +1,8 @@
-# cardwall（TreeNote）
+# TreeNote
 
 [中文](README.md) · **English** | [English](README.en.md)
 
-<img src="docs/icon.png" width="92" align="right" alt="cardwall icon">
+<img src="docs/icon.png" width="92" align="right" alt="TreeNote icon">
 
 > TreeNote —— 树状笔记的下一种形态：要点能自己排成层次。
 
@@ -28,6 +28,17 @@
 
 > 一句话区分：**网页版让你 30 秒判断「要不要下载」，桌面版才是你长期用的那一个。** 网页版不写 localStorage、不上传、你的内容不会离开那个标签页。
 
+## v0.9.2 更新
+
+新用户引导 + 反馈，品牌统一为 TreeNote：
+
+- **首次启动自动打开使用指南**：第一次运行（本地还没有任何图）时自动弹一次指南，不再把新用户丢到一棵样本树上不知所措
+- **网页版「不保存」常驻提醒**：底部一条细横幅，明说刷新即丢、建议下载桌面版（可一键关掉，仅在本次会话）
+- **画布空状态提示**：新建的空白图会显示「双击空白新建 · 悬停点 ＋ 加子节点 · 按 T 整理」，第一次操作后自动淡出
+- **桌面「已保存」反馈**：自动保存落地后，顶栏短暂亮起「已保存」，存没存上一眼可知
+- **网页导出 Toast**：网页端导出 PDF 后提示「已下载 PDF」，不再静默
+- **品牌统一为 TreeNote**：标签页、窗口标题、首页标题、工具栏品牌位统一显示 TreeNote（包名与二进制仍为 `cardwall`，保持构建稳定）
+
 ## v0.9.1 更新
 
 把「这面墙」带出门：
@@ -52,7 +63,7 @@
 
 ## 下载
 
-[GitHub Releases](https://github.com/Franky100-pig/TreeNote/releases/latest) 提供（当前 **v0.9.1**）：
+[GitHub Releases](https://github.com/Franky100-pig/TreeNote/releases/latest) 提供（当前 **v0.9.2**）：
 
 - **macOS**（arm64）dmg——未做代码签名，首次启动需**右键 → 打开**，或执行 `xattr -dr com.apple.quarantine /Applications/cardwall.app`
 - **Windows**（x64）安装包（`.exe`，辅助安装、免管理员权限）+ 免安装 `.zip`

@@ -1,8 +1,8 @@
-# cardwall (TreeNote)
+# TreeNote
 
 **[中文](README.md)** · English | [中文](README.md)
 
-<img src="docs/icon.png" width="92" align="right" alt="cardwall icon">
+<img src="docs/icon.png" width="92" align="right" alt="TreeNote icon">
 
 > TreeNote — the next shape of outline notes: your points arrange themselves into a hierarchy.
 
@@ -28,6 +28,17 @@ A tool is worth what it remembers about you. The desktop build is a wall with **
 
 > In one line: **the web edition helps you decide in 30 seconds whether to download; the desktop app is the one you keep.** The web build writes no localStorage, uploads nothing — what you type never leaves that tab.
 
+## What's new in v0.9.2
+
+First-run guidance and feedback, with the brand unified as TreeNote:
+
+- **The guide opens itself on first run**: the very first launch (empty vault) pops the guide once, instead of dropping a new user onto a sample tree with no explanation
+- **Persistent "web saves nothing" strip**: a thin bar at the bottom spells out that a reload forgets everything and points to the desktop build (dismissable for the session only)
+- **Empty-canvas hint**: a freshly created blank board shows "double-click to add · hover ＋ for a child · T to tidy", then fades on the first action
+- **Desktop "已保存" pulse**: a quiet "saved" confirmation after each auto-save lands
+- **Web export toast**: the web edition now confirms "已下载 PDF" instead of downloading silently
+- **Brand unified as TreeNote**: tab title, window title, home header and toolbar brand all read TreeNote (the package/binary stays `cardwall` for stability)
+
 ## What's new in v0.9.1
 
 Take the wall with you:
@@ -52,7 +63,7 @@ Press `H`, or click **Home** in the top bar (right next to one-click tidy). Name
 
 ## Download
 
-[GitHub Releases](https://github.com/Franky100-pig/TreeNote/releases/latest) ships (currently **v0.9.1**):
+[GitHub Releases](https://github.com/Franky100-pig/TreeNote/releases/latest) ships (currently **v0.9.2**):
 
 - **macOS** (arm64) dmg — not code-signed, so the first launch needs **right-click → Open**, or run `xattr -dr com.apple.quarantine /Applications/cardwall.app`
 - **Windows** (x64) installer (`.exe`, assisted, no admin needed) + a portable `.zip`
