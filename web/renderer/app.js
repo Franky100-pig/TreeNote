@@ -29,6 +29,14 @@
   var dialogLabel = document.getElementById('dialog-label');
   var dialogCancel = document.getElementById('dialog-cancel');
 
+  // Lightweight feedback surfaces: saved pill (desktop), web banner, first-run
+  // canvas hint, and a transient toast.
+  var saveStatusEl = document.getElementById('save-status');
+  var webBannerEl = document.getElementById('web-banner');
+  var webBannerClose = document.getElementById('web-banner-close');
+  var canvasHintEl = document.getElementById('canvas-hint');
+  var toastEl = document.getElementById('toast');
+
   // ---- world setup -------------------------------------------------------
   // Preset card colours — a whitelist, so a hand-edited board file can never
   // inject an arbitrary value into the DOM (main.js sanitises to the same
@@ -46,6 +54,17 @@
   // a `var` read before its assignment line is still undefined).
   var THEME_KEY = 'cardwall.theme';
   var THEME_MODES = ['dark', 'light', 'auto'];
+
+  // Platform + smoke flags, defined EARLY because the toolbar wiring below reads
+  // them. (This also fixes a latent bug: isWebPlatform used to be assigned far
+  // down the IIFE, so the Guidance web-note check — which runs earlier — always
+  // saw `undefined` and never revealed the "web saves nothing" line.)
+  var isWebPlatform = !!(window.cardwall && window.cardwall.platform === 'web');
+  // Smoke runs against a fresh temp vault (which looks like a genuine first
+  // run); main.js tags the URL so we skip the first-run Guidance popup and keep
+  // the automated checks looking at an unobstructed board.
+  var isSmokeRun = typeof location !== 'undefined' &&
+    /(?:^|[?&])smoke=1(?:&|$)/.test(location.search);
 
   var world = CardPhysics.createWorld({ seed: 7 });
   var cardEls = new Map(); // id -> HTMLElement
@@ -256,6 +275,7 @@
     saveState.inFlight = true;
     saveState.pending = window.cardwall.saveBoard(currentBoard.id, serialize()).then(function (r) {
       saveState.inFlight = false;
+      if (r && r.ok !== false) flashSaved(); // quiet desktop "已保存" pulse
       return r;
     }, function (err) {
       saveState.inFlight = false;
@@ -496,13 +516,61 @@
     syncDOM();
     currentBoard = { id: board.id, name: board.name || '未命名' };
     boardNameEl.textContent = currentBoard.name;
-    document.title = currentBoard.name + ' — cardwall';
+    document.title = currentBoard.name + ' — TreeNote';
     showHome(false);
+    showCanvasHint();
     if (!loopStarted) {
       loopStarted = true;
       requestAnimationFrame(frame);
     }
     markSessionDirty(); // this board + this camera is now "where you left off"
+  }
+
+  // ---- lightweight feedback: toast / saved pill / first-run hint -----------
+  var toastTimer = null;
+  function showToast(msg) {
+    if (!toastEl) return;
+    toastEl.textContent = msg;
+    toastEl.hidden = false;
+    void toastEl.offsetWidth; // restart the fade-in even on rapid repeats
+    toastEl.classList.add('show');
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () {
+      toastEl.classList.remove('show');
+      toastTimer = setTimeout(function () { toastEl.hidden = true; }, 260);
+    }, 2200);
+  }
+
+  var saveStatusTimer = null;
+  function flashSaved() {
+    // The web edition saves nothing, so a "saved" pill there would be a lie.
+    if (!saveStatusEl || isWebPlatform) return;
+    saveStatusEl.textContent = '已保存';
+    saveStatusEl.classList.add('show');
+    if (saveStatusTimer) clearTimeout(saveStatusTimer);
+    saveStatusTimer = setTimeout(function () { saveStatusEl.classList.remove('show'); }, 1400);
+  }
+
+  var canvasHintTimer = null;
+  function showCanvasHint() {
+    // Only on a genuinely near-empty board (the lone starter card), never in
+    // smoke, and never on top of the first-run Guidance popup.
+    if (!canvasHintEl || isSmokeRun) return;
+    if (world.cards.length > 1) return;
+    if (guidanceEl && !guidanceEl.hidden) return;
+    canvasHintEl.hidden = false;
+    void canvasHintEl.offsetWidth;
+    canvasHintEl.classList.add('show');
+    if (canvasHintTimer) clearTimeout(canvasHintTimer);
+    canvasHintTimer = setTimeout(hideCanvasHint, 9000);
+  }
+  function hideCanvasHint() {
+    if (!canvasHintEl) return;
+    if (canvasHintTimer) { clearTimeout(canvasHintTimer); canvasHintTimer = null; }
+    canvasHintEl.classList.remove('show');
+    setTimeout(function () {
+      if (!canvasHintEl.classList.contains('show')) canvasHintEl.hidden = true;
+    }, 420);
   }
 
   function boot() {
@@ -534,8 +602,10 @@
         window.__cardwallReady = true;
         return;
       }
+      var firstRun = false;
       return bridge.listBoards().then(function (list) {
         if (list && list.length) return bridge.openBoard(list[0].id);
+        firstRun = true;
         // First run: one named board, seeded so the canvas is not empty.
         return bridge.createBoard('我的第一幅图').then(function (created) {
           return bridge.saveBoard(created.id, { cards: window.SAMPLE_TREE }).then(function () {
@@ -547,6 +617,10 @@
         openBoardInto(board);
         renderHome();
         bootInfo.openedBoardId = currentBoard.id;
+        // Genuine first run: open the guide once so a new user is not dropped
+        // onto a sample tree with no idea what to do. Skipped in smoke (the
+        // temp vault always looks like a first run).
+        if (firstRun && !isSmokeRun) openGuidance();
         window.__cardwallReady = true;
       });
     }).catch(function (err) {
@@ -562,9 +636,9 @@
     homeEl.hidden = !on;
     if (on) {
       renderHome();
-      document.title = '卡片墙 — cardwall';
+      document.title = 'TreeNote';
     } else if (currentBoard.name) {
-      document.title = currentBoard.name + ' — cardwall';
+      document.title = currentBoard.name + ' — TreeNote';
     }
   }
 
@@ -802,6 +876,14 @@
   // panel (desktop users never see this line).
   var webNote = document.getElementById('web-note');
   if (webNote && isWebPlatform) webNote.hidden = false;
+  // The persistent web reminder. Dismissal lasts for the session only — the
+  // web edition keeps nothing, so there is no preference to persist.
+  if (webBannerEl && isWebPlatform) webBannerEl.hidden = false;
+  if (webBannerClose) {
+    webBannerClose.addEventListener('click', function () {
+      if (webBannerEl) webBannerEl.hidden = true;
+    });
+  }
   // The top bar's quick "返回首页" (next to 一键整洁): always opens the library.
   // The library's own "← 返回当前图" button takes you back to the board.
   var homeTopBtn = document.getElementById('home-top-btn');
@@ -1065,6 +1147,7 @@
     select(id);
     markDirty();
     syncDOM();
+    hideCanvasHint();
     startEdit(card);
     return card;
   }
@@ -1078,6 +1161,7 @@
     if (!card) return;
     world.dragId = card.id;
     wakeBranch(card.id);
+    hideCanvasHint();
   }
 
   // Called when the user lets go of a card.
@@ -1130,9 +1214,16 @@
       theme: themeName, title: currentBoard.name, dpi: 300
     });
     window.CardwallExport.buildPdfFromCanvas(render, 0.95).then(function (pdfBytes) {
-      var filename = (window.CardwallGeom ? window.CardwallGeom.sanitizeFilename(currentBoard.name) : 'cardwall') + '.pdf';
+      var filename = (window.CardwallGeom ? window.CardwallGeom.sanitizeFilename(currentBoard.name) : 'TreeNote') + '.pdf';
       if (window.cardwall && typeof window.cardwall.exportPdf === 'function') {
-        window.cardwall.exportPdf(filename, pdfBytes);
+        var done = window.cardwall.exportPdf(filename, pdfBytes);
+        // The web edition downloads silently; confirm it so the click reads as
+        // having worked. The desktop shows its own native save dialog instead.
+        if (done && typeof done.then === 'function') {
+          done.then(function (r) {
+            if (isWebPlatform && (!r || r.ok !== false)) showToast('已下载 PDF');
+          });
+        }
       } else {
         // Fallback anchor download (e.g. a smoke run without a bridge).
         var blob = new Blob([pdfBytes], { type: 'application/pdf' });
@@ -1330,7 +1421,8 @@
   // remembered across launches on the DESKTOP build (index.html applies it
   // before the first paint so a light board does not flash black on boot).
   // The web edition remembers nothing — not even the theme.
-  var isWebPlatform = !!(window.cardwall && window.cardwall.platform === 'web');
+  // (isWebPlatform is defined near the top of the IIFE, before the toolbar
+  // wiring reads it.)
 
   function storedTheme() {
     try {
@@ -2006,9 +2098,21 @@
       (exportBtnEl.compareDocumentPosition(guidanceBtnEl) &
         Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
 
+    // Brand + feedback surfaces (v0.9.2): the product reads as TreeNote in the
+    // toolbar, the desktop has a saved-status slot, and the web-only banner must
+    // stay HIDDEN on the desktop build (it would be an outright lie there).
+    var brandEl = document.querySelector('#toolbar .brand');
+    var brandOk = !!brandEl && brandEl.textContent.trim() === 'TreeNote';
+    var saveStatusOk = !!document.getElementById('save-status');
+    var webBannerEl2 = document.getElementById('web-banner');
+    var webBannerOk = !isWebPlatform
+      ? (!!webBannerEl2 && webBannerEl2.hidden)
+      : !!webBannerEl2;
+
     return {
       ok: hasBar && editOk && addOk && delOk && tidyFeedback && colorOk &&
-        exportTagOk && exportClickable && exportLeftOfGuidance,
+        exportTagOk && exportClickable && exportLeftOfGuidance &&
+        brandOk && saveStatusOk && webBannerOk,
       hasBar: hasBar,
       editOk: editOk,
       addOk: addOk,
@@ -2017,7 +2121,10 @@
       tidyFeedback: tidyFeedback,
       exportTagOk: exportTagOk,
       exportClickable: exportClickable,
-      exportLeftOfGuidance: exportLeftOfGuidance
+      exportLeftOfGuidance: exportLeftOfGuidance,
+      brandOk: brandOk,
+      saveStatusOk: saveStatusOk,
+      webBannerOk: webBannerOk
     };
   };
 
