@@ -581,17 +581,37 @@
 
   // ---- lightweight feedback: toast / saved pill / first-run hint -----------
   var toastTimer = null;
-  function showToast(msg) {
+  var toastHideTimer = null;
+  function hideToast() {
     if (!toastEl) return;
-    toastEl.textContent = msg;
+    toastEl.classList.remove('show');
+    if (toastHideTimer) clearTimeout(toastHideTimer);
+    toastHideTimer = setTimeout(function () { toastEl.hidden = true; }, 260);
+  }
+  // Optional action button ("撤销") turns the toast into an undo affordance.
+  function showToast(msg, actionLabel, actionFn, duration) {
+    if (!toastEl) return;
+    toastEl.textContent = '';
+    var text = document.createElement('span');
+    text.textContent = msg;
+    toastEl.appendChild(text);
+    if (actionLabel) {
+      var act = document.createElement('button');
+      act.type = 'button';
+      act.className = 'toast-action';
+      act.textContent = actionLabel;
+      act.addEventListener('click', function () {
+        hideToast();
+        if (actionFn) actionFn();
+      });
+      toastEl.appendChild(act);
+    }
     toastEl.hidden = false;
     void toastEl.offsetWidth; // restart the fade-in even on rapid repeats
     toastEl.classList.add('show');
     if (toastTimer) clearTimeout(toastTimer);
-    toastTimer = setTimeout(function () {
-      toastEl.classList.remove('show');
-      toastTimer = setTimeout(function () { toastEl.hidden = true; }, 260);
-    }, 2200);
+    if (toastHideTimer) clearTimeout(toastHideTimer);
+    toastTimer = setTimeout(hideToast, duration || 2200);
   }
 
   var saveStatusTimer = null;
@@ -1597,6 +1617,7 @@
     pushHistory(cmd);
     markDirty();
     syncDOM();
+    showToast('已删除「' + title + '」', '撤销', function () { undoCommand(cmd); }, 5000);
   }
 
   // ---- card colours --------------------------------------------------------
