@@ -28,6 +28,17 @@ A tool is worth what it remembers about you. The desktop build is a wall with **
 
 > In one line: **the web edition helps you decide in 30 seconds whether to download; the desktop app is the one you keep.** The web build writes no localStorage, uploads nothing — what you type never leaves that tab.
 
+## What's new in v0.10.0
+
+Big-board usability plus slip protection:
+
+- **Fold / unfold a subtree**: a `▾N` badge appears at a card's bottom-right; one click tucks the whole branch away, and in tidy mode its siblings close the gap. The folded state is saved with the board, and PDF export only draws what is visible
+- **Undo / redo**: `⌘/Ctrl+Z` / `⇧⌘Z`, covering drags, re-parenting, colour changes, creates and deletes; a delete also raises an "已删除 · 撤销" toast
+- **Side editor**: double-click a card (or press ✎) to open a docked panel on the right — title and body get room to breathe, and the card updates live as you type (`Esc` finishes)
+- **Library search + sort**: filter by name and order by recent / name / card count; favourites still float first
+- **Window frame memory**: the desktop remembers its size and position (validated against the current displays so it never reopens off-screen)
+- **Tests**: unit 73 → 74 (new fold-layout test), 13 smoke layers with new `historyOk` / `foldOk` assertions
+
 ## What's new in v0.9.2
 
 First-run guidance and feedback, with the brand unified as TreeNote:
@@ -63,7 +74,7 @@ Press `H`, or click **Home** in the top bar (right next to one-click tidy). Name
 
 ## Download
 
-[GitHub Releases](https://github.com/Franky100-pig/TreeNote/releases/latest) ships (currently **v0.9.2**):
+[GitHub Releases](https://github.com/Franky100-pig/TreeNote/releases/latest) ships (currently **v0.10.0**):
 
 - **macOS** (arm64) dmg — not code-signed, so the first launch needs **right-click → Open**, or run `xattr -dr com.apple.quarantine /Applications/cardwall.app`
 - **Windows** (x64) installer (`.exe`, assisted, no admin needed) + a portable `.zip`
