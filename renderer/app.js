@@ -515,6 +515,10 @@
     selectedId = null;
     editingId = null;
     worldPaused = false;
+    // A different board starts with a clean history.
+    undoStack.length = 0;
+    redoStack.length = 0;
+    closeEditorPanel();
     saveState.dirty = false;
     acc = 0;
     tween = null;
@@ -1045,27 +1049,106 @@
     if (el) el.classList.add('selected');
   }
 
-  function editorEls(id) {
-    var el = cardEls.get(id);
-    if (!el) return null;
+  // ---- undo / redo ---------------------------------------------------------
+  // A small command stack over DISCRETE actions (a drop, a colour pick, a
+  // create, a delete, a re-parent). Physics and live typing are never recorded.
+  // Undo/redo rebuilds the world DOM afterwards — cheap at these board sizes
+  // and far less error-prone than patching every edge case in place.
+  var undoStack = [];
+  var redoStack = [];
+  var MAX_HISTORY = 60;
+  var historyApplying = false;
+
+  function snapshotCard(c) {
     return {
-      el: el,
-      title: el.querySelector('.card-title'),
-      note: el.querySelector('.card-note')
+      id: c.id, title: c.title, note: c.note, x: c.x, y: c.y,
+      parent: c.parent || null, color: c.color || null,
+      collapsed: c.collapsed === true
     };
   }
 
-  function caretToEnd(elm) {
-    var range = document.createRange();
-    range.selectNodeContents(elm);
-    range.collapse(false);
-    var sel = window.getSelection();
-    sel.removeAllRanges();
-    sel.addRange(range);
+  function addCardFromSnapshot(s) {
+    return CardPhysics.addCard(world, {
+      id: s.id, x: s.x, y: s.y, parent: s.parent, title: s.title,
+      note: s.note || '', color: s.color || null, collapsed: s.collapsed === true
+    });
   }
 
-  // Editing pauses the world: with Brownian drift running, the text would
-  // slide under the caret. Pause/resume is the whole focus-mode contract.
+  function isTypingTarget(el) {
+    return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
+  }
+
+  function pushHistory(cmd) {
+    if (historyApplying || !cmd) return;
+    undoStack.push(cmd);
+    if (undoStack.length > MAX_HISTORY) undoStack.shift();
+    redoStack.length = 0;
+  }
+
+  function resyncBoard() {
+    cardEls.forEach(function (el) { el.remove(); });
+    cardEls.clear();
+    edgeEls.forEach(function (p) { p.remove(); });
+    edgeEls.clear();
+    // The editor's target may have been removed by the command.
+    editingId = null;
+    worldPaused = false;
+    editStart = null;
+    closeEditorPanel();
+    CardPhysics.computeTreeLayout(world);
+    buildDOM();
+    world.cards.forEach(measure);
+    if (selectedId && !CardPhysics.findCard(world, selectedId)) selectedId = null;
+    syncDOM();
+    if (selectedId && cardEls.get(selectedId)) cardEls.get(selectedId).classList.add('selected');
+  }
+
+  function applyHistory(kind) {
+    if (editingId) commitEdit();
+    var from = kind === 'undo' ? undoStack : redoStack;
+    var to = kind === 'undo' ? redoStack : undoStack;
+    var cmd = from.pop();
+    if (!cmd) return false;
+    historyApplying = true;
+    try { cmd[kind](); } finally { historyApplying = false; }
+    to.push(cmd);
+    resyncBoard();
+    markDirty();
+    return true;
+  }
+
+  function undo() { return applyHistory('undo'); }
+  function redo() { return applyHistory('redo'); }
+
+  // Undo one SPECIFIC command (the delete toast targets the delete it announced,
+  // even if other actions happened in between).
+  function undoCommand(cmd) {
+    var i = undoStack.indexOf(cmd);
+    if (i < 0) return false;
+    if (editingId) commitEdit();
+    undoStack.splice(i, 1);
+    historyApplying = true;
+    try { cmd.undo(); } finally { historyApplying = false; }
+    redoStack.push(cmd);
+    resyncBoard();
+    markDirty();
+    return true;
+  }
+
+  // Desktop routes Cmd+Z through the app menu (see main.js); the web edition
+  // has no menu, so its keydown handler calls these directly.
+  window.__cardwallUndo = function () { return undo(); };
+  window.__cardwallRedo = function () { return redo(); };
+  window.__cardwallHistoryInfo = function () {
+    return { undo: undoStack.length, redo: redoStack.length };
+  };
+
+  // Editing opens a docked side panel (Obsidian-style). The card is updated
+  // live as you type; the panel has room for long notes and keeps the canvas
+  // gestures alive. Physics pauses while the panel is open so the card doesn't
+  // drift under your cursor.
+  var editStart = null; // { title, note } captured when the panel opens
+
   function startEdit(card) {
     if (!card) return;
     if (editingId === card.id && editorPanelEl && !editorPanelEl.hidden) {
