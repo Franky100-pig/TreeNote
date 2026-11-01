@@ -1267,11 +1267,18 @@
   // as on screen) and wrapped in a dependency-free PDF. Desktop routes the
   // bytes through the main process for a native "Save As" dialog; the web
   // edition downloads them directly in the browser.
+  // Cards the user can actually see: a folded branch is excluded from export
+  // so the PDF matches the screen (a hidden subtree must not inflate the page).
+  function visibleCards() {
+    var hidden = CardPhysics.hiddenSet(world);
+    return world.cards.filter(function (c) { return !hidden.has(c.id); });
+  }
+
   function exportBoardPdf() {
     if (!window.CardwallExport || !window.CardwallPdf) return;
     var themeAttr = document.documentElement.getAttribute('data-theme');
     var themeName = themeAttr === 'light' ? 'light' : 'dark';
-    var render = window.CardwallExport.renderBoardToPdf(world.cards, {
+    var render = window.CardwallExport.renderBoardToPdf(visibleCards(), {
       theme: themeName, title: currentBoard.name, dpi: 300
     });
     window.CardwallExport.buildPdfFromCanvas(render, 0.95).then(function (pdfBytes) {
@@ -1312,7 +1319,8 @@
         }
         var themeAttr = document.documentElement.getAttribute('data-theme');
         var themeName = themeAttr === 'light' ? 'light' : 'dark';
-        var render = window.CardwallExport.renderBoardToPdf(world.cards, {
+        var vis = visibleCards();
+        var render = window.CardwallExport.renderBoardToPdf(vis, {
           theme: themeName, title: currentBoard.name
         });
         window.CardwallExport.buildPdfFromCanvas(render, 0.92).then(function (bytes) {
@@ -1322,7 +1330,7 @@
             ok: bytes.length > 100 && head.indexOf('%PDF') === 0,
             bytesLen: bytes.length, header: head,
             pageW: render.pageW, pageH: render.pageH,
-            cards: world.cards.length
+            cards: vis.length
           });
         }).catch(function (e) { resolve({ ok: false, error: String(e) }); });
       } catch (e) { resolve({ ok: false, error: String(e) }); }
