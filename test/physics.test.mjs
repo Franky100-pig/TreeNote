@@ -327,3 +327,31 @@ test('松手后无阻尼滑行：自由态下别的节点残余速度必须衰�
   for (const b of atRelease) maxDrift = Math.max(maxDrift, Math.hypot(b.c.x - b.x, b.c.y - b.y));
   assert.ok(maxDrift < 10, `松手后所有节点停在落点附近（不再漂走）: maxDrift=${maxDrift.toFixed(1)}px`);
 });
+
+test('折叠：隐藏整棵子树，折叠节点仍可见并当作叶子，展开后恢复', () => {
+  const w = makeWorld({ drift: false });
+  addCard(w, { id: 'root', x: 0, y: 0 });
+  addCard(w, { id: 'a', x: -300, y: -200, parent: 'root' });
+  addCard(w, { id: 'a1', x: -300, y: -400, parent: 'a' });
+  addCard(w, { id: 'a2', x: -100, y: -400, parent: 'a' });
+  addCard(w, { id: 'b', x: 300, y: -200, parent: 'root' });
+
+  physics.findCard(w, 'a').collapsed = true;
+  computeTreeLayout(w);
+  const hidden = physics.hiddenSet(w);
+  assert.ok(hidden.has('a1') && hidden.has('a2'), 'a 的子孙应被隐藏');
+  assert.ok(!hidden.has('a') && !hidden.has('b') && !hidden.has('root'), '折叠节点本身与旁支仍可见');
+  assert.equal(w._roots.length, 1, '折叠后仍只有一个根');
+
+  // 折叠的 a 现在是叶子：布局不应把 a1/a2 算进去（它们保持原位）
+  const a1 = physics.findCard(w, 'a1');
+  const before = { x: a1.x, y: a1.y };
+  for (let i = 0; i < 300; i++) step(w);
+  assert.ok(Math.abs(a1.x - before.x) < 0.001 && Math.abs(a1.y - before.y) < 0.001,
+    '隐藏卡不应被物理移动');
+
+  physics.findCard(w, 'a').collapsed = false;
+  computeTreeLayout(w);
+  const open = physics.hiddenSet(w);
+  assert.ok(!open.has('a1') && !open.has('a2'), '展开后子孙恢复可见');
+});
