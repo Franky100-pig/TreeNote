@@ -211,11 +211,16 @@
     return { x: card.x + dx * s, y: card.y + dy * s };
   }
 
-  function updateEdges() {
+  function updateEdges(hidden) {
     edgeEls.forEach(function (path, childId) {
       var child = CardPhysics.findCard(world, childId);
+      if (!child || !child.parent) { path.style.display = 'none'; return; }
       var parent = CardPhysics.findCard(world, child.parent);
-      if (!child || !parent) return;
+      if (!parent || (hidden && (hidden.has(childId) || hidden.has(parent.id)))) {
+        path.style.display = 'none';
+        return;
+      }
+      path.style.display = '';
       var p1 = borderPoint(parent, child.x, child.y);
       var p2 = borderPoint(child, parent.x, parent.y);
       var dx = p2.x - p1.x, dy = p2.y - p1.y;
@@ -232,14 +237,38 @@
 
   // ---- per-frame DOM sync ---------------------------------------------------
   function syncDOM() {
+    // world._hidden is refreshed by computeTreeLayout on every physics step;
+    // fall back to a direct query for calls made outside the frame loop (e.g.
+    // right after a fold toggle).
+    var hidden = (world._hidden && typeof world._hidden.has === 'function')
+      ? world._hidden
+      : CardPhysics.hiddenSet(world);
+    var childCount = Object.create(null);
+    world.cards.forEach(function (c) {
+      if (c.parent) childCount[c.parent] = (childCount[c.parent] || 0) + 1;
+    });
     world.cards.forEach(function (card) {
       var el = cardEls.get(card.id);
-      if (el) {
-        el.style.transform =
-          'translate(-50%, -50%) translate(' + card.x.toFixed(2) + 'px, ' + card.y.toFixed(2) + 'px)';
+      if (!el) return;
+      var isHidden = hidden.has(card.id);
+      // display:none (not the `hidden` attribute) so card CSS cannot override it.
+      el.style.display = isHidden ? 'none' : '';
+      if (isHidden) return;
+      el.style.transform =
+        'translate(-50%, -50%) translate(' + card.x.toFixed(2) + 'px, ' + card.y.toFixed(2) + 'px)';
+      el.classList.toggle('collapsed', !!card.collapsed);
+      var fold = el.querySelector('.card-fold');
+      if (fold) {
+        var n = childCount[card.id] || 0;
+        fold.hidden = n === 0;
+        if (n) {
+          fold.textContent = (card.collapsed ? '▸ ' : '▾ ') + n;
+          fold.setAttribute('aria-expanded', card.collapsed ? 'false' : 'true');
+          fold.title = card.collapsed ? '展开子树' : '折叠子树';
+        }
       }
     });
-    updateEdges();
+    updateEdges(hidden);
   }
 
   // ---- persistence (C6) -------------------------------------------------------
@@ -1121,6 +1150,24 @@
     markDirty();
     syncDOM();
     return true;
+  }
+
+  // Fold / unfold a branch. A folded card stays visible but is packed as a
+  // leaf; its whole subtree is hidden from layout, picking and export. In tidy
+  // mode every card is woken so the tree closes the gap right away.
+  function toggleCollapse(id) {
+    var card = CardPhysics.findCard(world, id);
+    if (!card) return;
+    var hasChild = world.cards.some(function (c) { return c.parent === id; });
+    if (!hasChild) return;
+    card.collapsed = !card.collapsed;
+    CardPhysics.computeTreeLayout(world); // refresh world._hidden + offsets
+    if (world.tidy) {
+      world.cards.forEach(function (c) { c.awake = true; c.still = 0; });
+    }
+    if (selectedId && world._hidden && world._hidden.has(selectedId)) select(null);
+    markDirty();
+    syncDOM();
   }
 
   function createCard(worldPoint, parentId) {
