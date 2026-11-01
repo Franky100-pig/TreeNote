@@ -1220,6 +1220,15 @@
       }
       measure(card);
       markDirty();
+      // If this card was just created, refresh its create-command snapshot so
+      // a later undo/redo restores what the user actually wrote, not a blank.
+      for (var hi = undoStack.length - 1; hi >= 0; hi--) {
+        var hcmd = undoStack[hi];
+        if (hcmd.type === 'create' && hcmd.id === card.id) {
+          hcmd.snapshot = snapshotCard(card);
+          break;
+        }
+      }
     }
     closeEditorPanel();
     syncDOM();
@@ -1313,10 +1322,18 @@
   function reparent(card, targetId) {
     if (!card || !targetId || targetId === card.id) return false;
     if (isAncestor(card.id, targetId)) return false; // would close a cycle
+    var from = card.parent || null;
+    if (from === targetId) return false; // already hangs there
     card.parent = targetId;
     addEdgePath(card);
     var el = cardEls.get(card.id);
     if (el) el.classList.remove('card-root');
+    var id = card.id;
+    pushHistory({
+      type: 'reparent',
+      undo: function () { var c = CardPhysics.findCard(world, id); if (c) c.parent = from; },
+      redo: function () { var c = CardPhysics.findCard(world, id); if (c) c.parent = targetId; }
+    });
     markDirty();
     syncDOM();
     return true;
@@ -1376,6 +1393,20 @@
     markDirty();
     syncDOM();
     hideCanvasHint();
+    var snap = snapshotCard(card);
+    var createCmd = {
+      type: 'create',
+      id: snap.id,
+      snapshot: snap,
+      undo: function () {
+        if (editingId === snap.id) {
+          editingId = null; worldPaused = false; editStart = null; closeEditorPanel();
+        }
+        CardPhysics.removeCard(world, snap.id);
+      },
+      redo: function () { addCardFromSnapshot(createCmd.snapshot); }
+    };
+    pushHistory(createCmd);
     startEdit(card);
     return card;
   }
@@ -1388,6 +1419,7 @@
   function onGrab(card) {
     if (!card) return;
     world.dragId = card.id;
+    card._dragStart = { x: card.x, y: card.y }; // for the undo move command
     wakeBranch(card.id);
     hideCanvasHint();
   }
@@ -1403,6 +1435,23 @@
     if (!card) return;
     world.tidy = false;
     world.dragId = null;
+    var start = card._dragStart;
+    card._dragStart = null;
+    if (start && (Math.abs(start.x - card.x) > 0.5 || Math.abs(start.y - card.y) > 0.5)) {
+      var id = card.id;
+      var to = { x: card.x, y: card.y };
+      pushHistory({
+        type: 'move',
+        undo: function () {
+          var c = CardPhysics.findCard(world, id);
+          if (c) { c.x = start.x; c.y = start.y; c.awake = true; c.still = 0; }
+        },
+        redo: function () {
+          var c = CardPhysics.findCard(world, id);
+          if (c) { c.x = to.x; c.y = to.y; c.awake = true; c.still = 0; }
+        }
+      });
+    }
     markDirty();
   }
 
@@ -1507,6 +1556,11 @@
   function deleteCard(id) {
     var card = CardPhysics.findCard(world, id);
     if (!card) return;
+    var snap = snapshotCard(card);
+    var childrenIds = world.cards
+      .filter(function (c) { return c.parent === id; })
+      .map(function (c) { return c.id; });
+    var title = card.title || '未命名';
     // Re-parent children to the deleted card's parent so the tree stays
     // connected instead of silently losing a whole subtree.
     world.cards.forEach(function (c) {
@@ -1520,7 +1574,27 @@
     removeEdgePath(id);
     CardPhysics.removeCard(world, id);
     if (selectedId === id) selectedId = null;
-    if (editingId === id) { editingId = null; worldPaused = false; }
+    if (editingId === id) {
+      editingId = null; worldPaused = false; editStart = null; closeEditorPanel();
+    }
+    var cmd = {
+      type: 'delete',
+      undo: function () {
+        addCardFromSnapshot(snap);
+        childrenIds.forEach(function (cid) {
+          var ch = CardPhysics.findCard(world, cid);
+          if (ch) ch.parent = snap.id;
+        });
+      },
+      redo: function () {
+        childrenIds.forEach(function (cid) {
+          var ch = CardPhysics.findCard(world, cid);
+          if (ch) ch.parent = snap.parent || null;
+        });
+        CardPhysics.removeCard(world, snap.id);
+      }
+    };
+    pushHistory(cmd);
     markDirty();
     syncDOM();
   }
@@ -1534,12 +1608,18 @@
     if (!card) return;
     var next = CARD_COLORS.indexOf(color) >= 0 ? color : null;
     if (card.color === next) return;
+    var from = card.color || null;
     card.color = next;
     var el = cardEls.get(id);
     if (el) {
       if (next) el.dataset.color = next;
       else delete el.dataset.color;
     }
+    pushHistory({
+      type: 'color',
+      undo: function () { var c = CardPhysics.findCard(world, id); if (c) c.color = from; },
+      redo: function () { var c = CardPhysics.findCard(world, id); if (c) c.color = next; }
+    });
     markDirty();
     syncDOM();
   }
