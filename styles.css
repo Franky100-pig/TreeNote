@@ -1146,3 +1146,42 @@ body {
 }
 #toast.show { opacity: 1; }
 #toast[hidden] { display: none; }
+/* ==== v0.10: fold toggle, side editor, library tools ===================== */
+
+/* Fold badge, hanging just below the card's bottom-right corner so it never
+   covers the title/note text. Only rendered when the card has children. */
+.card-fold {
+  position: absolute;
+  right: 6px;
+  bottom: -13px;
+  z-index: 5;
+  height: 21px;
+  min-width: 34px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid var(--surface-border);
+  background: var(--surface);
+  color: var(--muted);
+  font: 600 11px/1 -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+  letter-spacing: 0;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: auto;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.card-fold:hover {
+  color: var(--ink);
+  border-color: var(--accent-soft);
+  background: var(--accent-soft);
+}
+.card.collapsed > .card-fold {
+  color: var(--accent-strong);
+  border-color: var(--accent-strong);
+}
+/* A folded branch reads as "cut" at a glance. */
+.card.collapsed {
+  border-style: dashed;
+}
+

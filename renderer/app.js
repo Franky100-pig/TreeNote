@@ -133,6 +133,17 @@
       '<button data-act="del" title="删除节点" tabindex="-1" aria-label="删除节点">✕</button>';
     el.appendChild(toolbar);
 
+    // Fold toggle for a branch. Hidden on childless cards; syncDOM keeps the
+    // child count and the ▸/▾ arrow fresh. Always visible (not hover-only) so a
+    // folded branch reads as folded at a glance.
+    var fold = document.createElement('button');
+    fold.type = 'button';
+    fold.className = 'card-fold';
+    fold.dataset.act = 'fold';
+    fold.tabIndex = -1;
+    fold.hidden = true;
+    el.appendChild(fold);
+
     // Freeze the card while the pointer is over it so the bar never slides
     // out from under the cursor. The flag is read by the physics integrator;
     // it is not persisted and is not a pin.
@@ -1352,6 +1363,14 @@
   // interaction.js already declines to drag/pan when the press lands on the
   // toolbar, so here we only need to act on the click.
   viewport.addEventListener('click', function (e) {
+    var foldBtn = e.target.closest ? e.target.closest('.card-fold') : null;
+    if (foldBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+      var foldEl = foldBtn.closest('.card');
+      if (foldEl) toggleCollapse(foldEl.dataset.id);
+      return;
+    }
     var btn = e.target.closest ? e.target.closest('.card-toolbar button') : null;
     if (!btn) return;
     e.preventDefault();
