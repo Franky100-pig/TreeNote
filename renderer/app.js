@@ -2288,15 +2288,20 @@
     pointer(rootEl, 'pointerup', rc.x, rc.y);
     dbl(rootEl, rc.x, rc.y);
     var editStarted = editingId === rootId && worldPaused &&
-      document.querySelectorAll('.card.editing').length === 1;
+      document.querySelectorAll('.card.editing').length === 1 &&
+      !!editorPanelEl && !editorPanelEl.hidden;
 
-    // 2. typing + Enter commits the title and resumes the world
-    var titleEl = rootEl.querySelector('.card-title');
-    titleEl.textContent = '已编辑标题';
-    key(titleEl, 'Enter');
-    var committed = CardPhysics.findCard(world, rootId).title === '已编辑标题' &&
+    // 2. typing in the side panel updates the card live; Esc commits and
+    //    resumes the world (the panel slides closed).
+    editorTitleEl.value = '已编辑标题';
+    editorTitleEl.dispatchEvent(new Event('input', { bubbles: true }));
+    var liveSynced = CardPhysics.findCard(world, rootId).title === '已编辑标题';
+    key(window, 'Escape');
+    var committed = liveSynced &&
+      CardPhysics.findCard(world, rootId).title === '已编辑标题' &&
       editingId === null && !worldPaused &&
-      document.querySelectorAll('.card.editing').length === 0;
+      document.querySelectorAll('.card.editing').length === 0 &&
+      !editorPanelEl.classList.contains('open');
 
     // 3. double-click just outside a card -> new card attached to the nearest node
     // (normalize the view first: earlier checks leave it zoomed/panned)
@@ -2333,7 +2338,7 @@
     var created = world.cards.length === before + 1 && newId !== null &&
       expectParent !== null &&
       CardPhysics.findCard(world, newId).parent === expectParent;
-    key(document.querySelector('.card.editing .card-title'), 'Escape'); // commit (empty -> 未命名)
+    key(window, 'Escape'); // commit the new card (empty -> 未命名)
 
     // 4. Delete removes the selected card, its element and its edge path
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true }));
@@ -2477,6 +2482,41 @@
       (exportBtnEl.compareDocumentPosition(guidanceBtnEl) &
         Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
 
+    // Undo/redo round trip (v0.10): create a throwaway child, undo the create,
+    // redo it, then delete it so the board is left as we found it.
+    if (editingId) commitEdit();
+    var hBefore = world.cards.length;
+    var hCard = createCard({ x: 0, y: 0 }, rootId);
+    var hId = hCard ? hCard.id : null;
+    if (editingId) commitEdit();
+    var made = !!hId && world.cards.length === hBefore + 1;
+    window.__cardwallUndo();
+    var undone = made && world.cards.length === hBefore && !CardPhysics.findCard(world, hId);
+    window.__cardwallRedo();
+    var redone = made && world.cards.length === hBefore + 1 && !!CardPhysics.findCard(world, hId);
+    var historyOk = made && undone && redone;
+    if (historyOk && CardPhysics.findCard(world, hId)) deleteCard(hId); // clean up
+
+    // Fold/unfold round trip (v0.10): a card with children shows the badge;
+    // folding hides its descendants from layout, unfolding brings them back.
+    var rootEl2 = document.querySelector('.card[data-id="root"]') || document.querySelector('.card');
+    var rootCard2 = rootEl2 ? CardPhysics.findCard(world, rootEl2.dataset.id) : null;
+    var foldOk = false;
+    if (rootCard2) {
+      var kids2 = world.cards.filter(function (c) { return c.parent === rootCard2.id; });
+      var badge = rootEl2.querySelector('.card-fold');
+      var badgeShown = !!badge && !badge.hidden;
+      if (kids2.length && badge) {
+        toggleCollapse(rootCard2.id);
+        var hid = rootCard2.collapsed === true &&
+          CardPhysics.hiddenSet(world).has(kids2[0].id);
+        toggleCollapse(rootCard2.id);
+        var back = rootCard2.collapsed === false &&
+          !CardPhysics.hiddenSet(world).has(kids2[0].id);
+        foldOk = badgeShown && hid && back;
+      }
+    }
+
     // Brand + feedback surfaces (v0.9.2): the product reads as TreeNote in the
     // toolbar, the desktop has a saved-status slot, and the web-only banner must
     // stay HIDDEN on the desktop build (it would be an outright lie there).
@@ -2491,7 +2531,7 @@
     return {
       ok: hasBar && editOk && addOk && delOk && tidyFeedback && colorOk &&
         exportTagOk && exportClickable && exportLeftOfGuidance &&
-        brandOk && saveStatusOk && webBannerOk,
+        brandOk && saveStatusOk && webBannerOk && historyOk && foldOk,
       hasBar: hasBar,
       editOk: editOk,
       addOk: addOk,
@@ -2503,7 +2543,9 @@
       exportLeftOfGuidance: exportLeftOfGuidance,
       brandOk: brandOk,
       saveStatusOk: saveStatusOk,
-      webBannerOk: webBannerOk
+      webBannerOk: webBannerOk,
+      historyOk: historyOk,
+      foldOk: foldOk
     };
   };
 
