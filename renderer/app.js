@@ -80,7 +80,8 @@
         parent: item.parent || null,
         title: item.title,
         note: item.note || '',
-        color: item.color || null
+        color: item.color || null,
+        collapsed: item.collapsed === true
       });
     });
   }
@@ -291,7 +292,7 @@
       version: 1,
       tidy: !!world.tidy,
       cards: world.cards.map(function (c) {
-        return {
+        var out = {
           id: c.id,
           title: c.title,
           note: c.note,
@@ -300,6 +301,8 @@
           parent: c.parent || null,
           color: c.color || null
         };
+        if (c.collapsed) out.collapsed = true; // only store the flag when set
+        return out;
       })
     };
   }

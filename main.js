@@ -133,7 +133,9 @@ function sanitizeBoard(data) {
       y: Number.isFinite(c.y) ? c.y : 0,
       parent: null,
       // Optional preset colour (see CARD_COLORS); anything else -> null.
-      color: cleanColor(c.color)
+      color: cleanColor(c.color),
+      // Folded branch flag (mind-map fold); anything but a real `true` -> open.
+      collapsed: c.collapsed === true
       // Free placement survives a reload: a card the user has positioned stays
       // put until they press 一键整洁 (the tidy pull is opt-in).
     });
