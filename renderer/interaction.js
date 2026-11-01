@@ -96,7 +96,7 @@
       // Cards in edit mode own their pointer: text selection, not dragging.
       // The hover toolbar's buttons must also decline to drag/pan — they
       // have their own click handler.
-      if (e.target.closest && e.target.closest('.card.editing, .card-toolbar')) return;
+      if (e.target.closest && e.target.closest('.card.editing, .card-toolbar, .card-fold')) return;
       onUserInteract(); // user takes over the camera
       try { viewport.setPointerCapture(e.pointerId); } catch (err) { /* synthetic pointer */ }
       pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });

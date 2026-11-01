@@ -37,6 +37,12 @@
   var canvasHintEl = document.getElementById('canvas-hint');
   var toastEl = document.getElementById('toast');
 
+  // Side editor (Obsidian-style) + library tools.
+  var editorPanelEl = document.getElementById('editor');
+  var editorTitleEl = document.getElementById('editor-title');
+  var editorNoteEl = document.getElementById('editor-note');
+  var editorCloseEl = document.getElementById('editor-close');
+  var editorDeleteEl = document.getElementById('editor-delete');
   // ---- world setup -------------------------------------------------------
   // Preset card colours — a whitelist, so a hand-edited board file can never
   // inject an arbitrary value into the DOM (main.js sanitises to the same
@@ -944,6 +950,28 @@
   if (tidyBtn) tidyBtn.addEventListener('click', function () { tidyAll(); });
   var exportPdfBtn = document.getElementById('export-pdf-btn');
   if (exportPdfBtn) exportPdfBtn.addEventListener('click', function () { exportBoardPdf(); });
+
+  // Side editor wiring: live sync, finish, delete, and Enter-to-note.
+  if (editorCloseEl) editorCloseEl.addEventListener('click', function () { commitEdit(); });
+  if (editorDeleteEl) editorDeleteEl.addEventListener('click', function () {
+    if (editingId) deleteCard(editingId);
+  });
+  if (editorTitleEl) {
+    editorTitleEl.addEventListener('input', applyEditorInput);
+    editorTitleEl.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { e.preventDefault(); editorNoteEl.focus(); }
+    });
+  }
+  if (editorNoteEl) {
+    editorNoteEl.addEventListener('input', applyEditorInput);
+    editorNoteEl.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' || (e.key === 'Enter' && (e.metaKey || e.ctrlKey))) {
+        e.preventDefault();
+        commitEdit();
+      }
+    });
+  }
+
   newBoardBtn.addEventListener('click', function () {
     askName({ title: '新的一幅图', value: '' }).then(function (name) {
       if (name == null) return;
@@ -1039,47 +1067,103 @@
   // Editing pauses the world: with Brownian drift running, the text would
   // slide under the caret. Pause/resume is the whole focus-mode contract.
   function startEdit(card) {
-    if (!card || editingId === card.id) return;
+    if (!card) return;
+    if (editingId === card.id && editorPanelEl && !editorPanelEl.hidden) {
+      editorTitleEl.focus();
+      return;
+    }
     if (editingId) commitEdit();
-    var parts = editorEls(card.id);
-    if (!parts) return;
+    var el = cardEls.get(card.id);
+    if (!el) return;
     editingId = card.id;
+    editStart = { title: card.title, note: card.note };
     worldPaused = true;
-    parts.el.classList.add('editing');
-    parts.title.contentEditable = 'plaintext-only';
-    parts.note.contentEditable = 'plaintext-only';
-    parts.title.focus();
-    caretToEnd(parts.title);
+    el.classList.add('editing');
+    raise(el);
+    if (editorPanelEl) {
+      editorTitleEl.value = (card.title && card.title !== '未命名') ? card.title : '';
+      editorNoteEl.value = card.note || '';
+      editorPanelEl.hidden = false;
+      // Next frame so the slide-in transition actually runs.
+      requestAnimationFrame(function () { editorPanelEl.classList.add('open'); });
+      editorTitleEl.focus();
+      var len = editorTitleEl.value.length;
+      try { editorTitleEl.setSelectionRange(len, len); } catch (err) { /* noop */ }
+    }
   }
 
-  function cancelEdit() {
+  // Live-sync the card while typing (the wall should feel like a preview).
+  function applyEditorInput() {
     if (!editingId) return;
     var card = CardPhysics.findCard(world, editingId);
-    var parts = editorEls(editingId);
-    if (card && parts) {
-      parts.title.textContent = card.title;
-      parts.note.textContent = card.note;
-    }
-    commitEdit();
+    var el = cardEls.get(editingId);
+    if (!card || !el) return;
+    card.title = editorTitleEl.value;
+    card.note = editorNoteEl.value;
+    var t = el.querySelector('.card-title');
+    var n = el.querySelector('.card-note');
+    if (t) t.textContent = card.title;
+    if (n) n.textContent = card.note;
+    measure(card); // text reflow can change the card size -> edge endpoints
+    markDirty();
+    syncDOM();
+  }
+
+  function closeEditorPanel() {
+    if (!editorPanelEl) return;
+    editorPanelEl.classList.remove('open');
+    setTimeout(function () {
+      if (!editorPanelEl.classList.contains('open')) editorPanelEl.hidden = true;
+    }, 230);
   }
 
   function commitEdit() {
     if (!editingId) return;
     var id = editingId;
     var card = CardPhysics.findCard(world, id);
-    var parts = editorEls(id);
+    var el = cardEls.get(id);
     editingId = null;
     worldPaused = false;
-    if (!card || !parts) return;
-    card.title = (parts.title.textContent || '').trim() || '未命名';
-    card.note = (parts.note.textContent || '').trim();
-    parts.title.textContent = card.title;
-    parts.note.textContent = card.note;
-    parts.title.contentEditable = 'false';
-    parts.note.contentEditable = 'false';
-    parts.el.classList.remove('editing');
-    measure(card); // text reflow can change the card size -> edge endpoints
-    markDirty();
+    editStart = null;
+    if (card) {
+      card.title = (editorTitleEl.value || '').trim() || '未命名';
+      card.note = (editorNoteEl.value || '').trim();
+      if (el) {
+        var t = el.querySelector('.card-title');
+        var n = el.querySelector('.card-note');
+        if (t) t.textContent = card.title;
+        if (n) n.textContent = card.note;
+        el.classList.remove('editing');
+      }
+      measure(card);
+      markDirty();
+    }
+    closeEditorPanel();
+    syncDOM();
+  }
+
+  function cancelEdit() {
+    if (!editingId) return;
+    var id = editingId;
+    var card = CardPhysics.findCard(world, id);
+    var el = cardEls.get(id);
+    if (card && editStart) {
+      card.title = editStart.title;
+      card.note = editStart.note;
+      if (el) {
+        var t = el.querySelector('.card-title');
+        var n = el.querySelector('.card-note');
+        if (t) t.textContent = card.title;
+        if (n) n.textContent = card.note;
+      }
+      measure(card);
+      markDirty();
+    }
+    if (el) el.classList.remove('editing');
+    editingId = null;
+    worldPaused = false;
+    editStart = null;
+    closeEditorPanel();
     syncDOM();
   }
 
@@ -1391,7 +1475,13 @@
     // is handled by the click listener below, which runs after pointerdown).
     if (!(e.target.closest && e.target.closest('.card-color-wrap'))) closeAllPalettes();
     var cardEl = e.target.closest ? e.target.closest('.card') : null;
-    if (editingId && (!cardEl || cardEl.dataset.id !== editingId)) commitEdit();
+    // Docked side panel: clicking empty canvas keeps it open (so you can pan
+    // while writing); clicking ANOTHER card switches the panel to that card.
+    if (editingId && cardEl && cardEl.dataset.id !== editingId) {
+      var nextCard = CardPhysics.findCard(world, cardEl.dataset.id);
+      commitEdit();
+      if (nextCard) startEdit(nextCard);
+    }
     select(cardEl ? cardEl.dataset.id : null);
   });
 
@@ -1399,7 +1489,7 @@
   // (child of the selection, if any). Toolbar buttons have their own click
   // handlers and must not also trigger a double-click edit.
   viewport.addEventListener('dblclick', function (e) {
-    if (e.target.closest && e.target.closest('.card-toolbar')) return;
+    if (e.target.closest && (e.target.closest('.card-toolbar') || e.target.closest('.card-fold'))) return;
     var cardEl = e.target.closest ? e.target.closest('.card') : null;
     if (cardEl) {
       var card = CardPhysics.findCard(world, cardEl.dataset.id);
@@ -1463,33 +1553,10 @@
     }
   });
 
-  viewport.addEventListener('keydown', function (e) {
-    if (!editingId) return;
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      cancelEdit();
-    } else if (e.key === 'Enter' && e.target.classList && e.target.classList.contains('card-title')) {
-      e.preventDefault();
-      commitEdit();
-    }
-  });
-
   viewport.addEventListener('input', function () {
     if (!editingId) return;
     var card = CardPhysics.findCard(world, editingId);
     if (card) { measure(card); syncDOM(); }
-  });
-
-  // Commit when focus leaves the edited card entirely (title <-> note moves
-  // must not commit, so check the card containment on the next tick).
-  viewport.addEventListener('focusout', function () {
-    if (!editingId) return;
-    setTimeout(function () {
-      if (!editingId) return;
-      var el = cardEls.get(editingId);
-      if (el && document.activeElement && el.contains(document.activeElement)) return;
-      commitEdit();
-    }, 0);
   });
 
   // ---- theme ---------------------------------------------------------------

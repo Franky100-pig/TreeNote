@@ -115,6 +115,25 @@
       </div>
     </section>
 
+    <!-- Obsidian-style side editor: docked right, the card updates live as you
+         type. Kept out of the card itself so long notes have room. -->
+    <aside id="editor" hidden aria-label="编辑卡片">
+      <header class="editor-head">
+        <span class="editor-kicker">编辑卡片</span>
+        <button id="editor-close" type="button" aria-label="完成">✕</button>
+      </header>
+      <div class="editor-body">
+        <label class="editor-label" for="editor-title">标题</label>
+        <input id="editor-title" type="text" maxlength="500" autocomplete="off" spellcheck="false">
+        <label class="editor-label" for="editor-note">内容</label>
+        <textarea id="editor-note" maxlength="20000" spellcheck="false"></textarea>
+        <div class="editor-foot">
+          <span class="editor-hint">Esc 完成 · 自动保存</span>
+          <button id="editor-delete" type="button">删除卡片</button>
+        </div>
+      </div>
+    </aside>
+
     <!-- One small dialog, reused for "new board" and "rename". -->
     <div id="dialog" hidden>
       <form id="dialog-form" class="dialog-inner">
