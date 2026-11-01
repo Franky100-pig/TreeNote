@@ -36,6 +36,9 @@ const LEGACY_BOARD_FILE = path.join(VAULT_DIR, 'board.json');
 // (pan/zoom) it was viewed at, so relaunching drops you straight back in.
 // The web edition has no session file at all (it remembers nothing).
 const SESSION_FILE = path.join(VAULT_DIR, 'session.json');
+// Desktop window frame (size/position/maximized), so a resized window reopens
+// the same size. Lives beside the session file; never touched by the web build.
+const WINDOW_STATE_FILE = path.join(VAULT_DIR, 'window.json');
 // The packaged app's __dirname lives inside a read-only asar, so the smoke
 // screenshot goes to the temp dir there; in dev it lands next to main.js.
 const SMOKE_SHOT = app.isPackaged
@@ -282,6 +285,63 @@ function writeSession(session) {
   }
 }
 
+// ---- window frame memory (desktop) ----------------------------------------
+// The window's size/position is a desktop-only preference: reopening restores
+// the frame you left. Bounds are validated against the CURRENT displays so a
+// window saved on an unplugged monitor never reopens off-screen.
+function sanitizeWindowState(v) {
+  if (!v || typeof v !== 'object') return null;
+  const width = Math.round(Number(v.width));
+  const height = Math.round(Number(v.height));
+  if (!Number.isFinite(width) || !Number.isFinite(height)) return null;
+  if (width < 640 || height < 480 || width > 10000 || height > 10000) return null;
+  const x = Math.round(Number(v.x));
+  const y = Math.round(Number(v.y));
+  return {
+    x: Number.isFinite(x) ? x : undefined,
+    y: Number.isFinite(y) ? y : undefined,
+    width: width,
+    height: height,
+    maximized: v.maximized === true
+  };
+}
+
+function readWindowState() {
+  try {
+    return sanitizeWindowState(JSON.parse(fs.readFileSync(WINDOW_STATE_FILE, 'utf8')));
+  } catch (err) {
+    if (err.code !== 'ENOENT') console.error('[window] read failed:', err.message);
+    return null;
+  }
+}
+
+function writeWindowState(win) {
+  if (!win || win.isDestroyed()) return;
+  try {
+    const b = win.getNormalBounds();
+    const state = {
+      x: b.x, y: b.y, width: b.width, height: b.height,
+      maximized: win.isMaximized()
+    };
+    fs.mkdirSync(VAULT_DIR, { recursive: true });
+    const tmp = WINDOW_STATE_FILE + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(state, null, 2), 'utf8');
+    fs.renameSync(tmp, WINDOW_STATE_FILE);
+  } catch (err) {
+    console.error('[window] write failed:', err.message);
+  }
+}
+
+// Does a saved rectangle intersect any connected display's work area?
+function isOnScreen(b) {
+  if (!b || b.x === undefined || b.y === undefined) return false;
+  return screen.getAllDisplays().some((d) => {
+    const a = d.workArea;
+    return b.x < a.x + a.width && b.x + b.width > a.x &&
+      b.y < a.y + a.height && b.y + b.height > a.y;
+  });
+}
+
 ipcMain.handle('session:load', () => readSession());
 
 ipcMain.handle('session:save', (event, session) => writeSession(session));
@@ -443,9 +503,10 @@ function buildAppMenu() {
 }
 
 function createWindow() {
-  const win = new BrowserWindow({
-    width: 1280,
-    height: 800,
+  const saved = readWindowState();
+  const opts = {
+    width: saved ? saved.width : 1280,
+    height: saved ? saved.height : 800,
     minWidth: 640,
     minHeight: 480,
     title: 'TreeNote',
@@ -456,6 +517,23 @@ function createWindow() {
       nodeIntegration: false,
       sandbox: false
     }
+  };
+  // Only restore x/y when the saved rectangle still lands on a live display.
+  if (saved && isOnScreen(saved)) { opts.x = saved.x; opts.y = saved.y; }
+  const win = new BrowserWindow(opts);
+  if (saved && saved.maximized) win.maximize();
+
+  // Persist the frame while the user moves/resizes (debounced), plus on close.
+  let winSaveTimer = null;
+  const scheduleWindowSave = () => {
+    if (winSaveTimer) clearTimeout(winSaveTimer);
+    winSaveTimer = setTimeout(() => { winSaveTimer = null; writeWindowState(win); }, 400);
+  };
+  win.on('resize', scheduleWindowSave);
+  win.on('move', scheduleWindowSave);
+  win.on('close', () => {
+    if (winSaveTimer) clearTimeout(winSaveTimer);
+    writeWindowState(win);
   });
 
   // Smoke runs against a fresh temp vault, which looks like a genuine first
