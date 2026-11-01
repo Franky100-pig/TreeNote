@@ -143,6 +143,9 @@
     card.vy = card.vy || 0;
     card.w = card.w || world.config.cardWidth;
     card.h = card.h || world.config.cardHeight;
+    // Folded branch: a collapsed card still draws, but its descendants are
+    // hidden from layout, picking and export (mind-map "fold").
+    card.collapsed = card.collapsed === true;
     card.dragging = false;
     card.awake = card.awake === undefined ? true : !!card.awake;
     card.still = 0;              // consecutive quiet steps (see dormancy)
@@ -180,6 +183,32 @@
    * where `base` is the primary root's current position (root drag) or the
    * lean point (child drag).
    */
+  // Which cards are hidden because an ancestor is collapsed? A collapsed
+  // card's children (and everything below them) vanish; the collapsed card
+  // itself stays visible and is treated as a leaf by the layout.
+  // O(n * depth): builds one id index instead of calling findCard per hop.
+  function computeHidden(world, byId) {
+    var hidden = new Set();
+    var anyCollapsed = false;
+    for (var i = 0; i < world.cards.length; i++) {
+      if (world.cards[i].collapsed) { anyCollapsed = true; break; }
+    }
+    if (!anyCollapsed) return hidden;
+    for (var j = 0; j < world.cards.length; j++) {
+      var c = world.cards[j];
+      if (!c.parent) continue;
+      var cur = c;
+      var guard = 0;
+      while (cur && cur.parent && guard++ < 4000) {
+        var p = byId.get(cur.parent);
+        if (!p) break;
+        if (p.collapsed) { hidden.add(c.id); break; }
+        cur = p;
+      }
+    }
+    return hidden;
+  }
+
   function computeTreeLayout(world) {
     var cfg = world.config;
     var byParent = new Map();
@@ -527,6 +556,13 @@
     removeCard: removeCard,
     findCard: findCard,
     computeTreeLayout: computeTreeLayout,
+    // Public, non-mutating visibility query (used by render + export to skip
+    // cards inside a folded branch).
+    hiddenSet: function (world) {
+      var byId = new Map();
+      world.cards.forEach(function (c) { byId.set(c.id, c); });
+      return computeHidden(world, byId);
+    },
     nearestAnchorRoot: nearestAnchorRoot,
     targetOf: targetOf,
     step: step,
