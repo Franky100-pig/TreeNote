@@ -1314,3 +1314,45 @@ body {
   background: rgba(255, 90, 90, 0.12);
 }
 
+/* ---- library search + sort ------------------------------------------------ */
+.home-tools {
+  display: flex;
+  gap: 10px;
+  margin: 2px 0 18px;
+}
+#home-search {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: 14px;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--surface-border);
+  border-radius: 9px;
+  padding: 9px 12px;
+  outline: none;
+}
+#home-search:focus {
+  border-color: var(--accent-soft);
+  box-shadow: 0 0 0 2px var(--accent-soft-ring);
+}
+#home-sort {
+  font: inherit;
+  font-size: 13px;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--surface-border);
+  border-radius: 9px;
+  padding: 9px 10px;
+  cursor: pointer;
+  outline: none;
+}
+
+@media (max-width: 720px) {
+  #editor {
+    width: 100vw;
+    max-width: 100vw;
+  }
+  .home-tools { flex-direction: column; }
+  #editor-note { min-height: 150px; }
+}

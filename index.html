@@ -110,6 +110,14 @@
             <button id="new-board" type="button">＋ 新建一幅</button>
           </div>
         </header>
+        <div class="home-tools">
+          <input id="home-search" type="search" placeholder="搜索图名" autocomplete="off" spellcheck="false" aria-label="搜索图名">
+          <select id="home-sort" aria-label="排序方式">
+            <option value="recent">最近编辑</option>
+            <option value="name">名称</option>
+            <option value="cards">卡片数</option>
+          </select>
+        </div>
         <div id="board-list" role="list"></div>
         <p id="home-empty" class="home-empty" hidden>还没有任何图，先新建一幅</p>
       </div>

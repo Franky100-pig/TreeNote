@@ -43,6 +43,9 @@
   var editorNoteEl = document.getElementById('editor-note');
   var editorCloseEl = document.getElementById('editor-close');
   var editorDeleteEl = document.getElementById('editor-delete');
+  var homeSearchEl = document.getElementById('home-search');
+  var homeSortEl = document.getElementById('home-sort');
+
   // ---- world setup -------------------------------------------------------
   // Preset card colours — a whitelist, so a hand-edited board file can never
   // inject an arbitrary value into the DOM (main.js sanitises to the same
@@ -732,18 +735,41 @@
     return (d.getMonth() + 1) + '月' + d.getDate() + '日';
   }
 
+  // Library view state (session only — the order/filter is a view preference).
+  var homeQuery = '';
+  var homeSort = 'recent';
+
   function renderHome() {
     if (!window.cardwall || typeof window.cardwall.listBoards !== 'function') {
       homeEmptyEl.hidden = false;
       return Promise.resolve([]);
     }
     return window.cardwall.listBoards().then(function (list) {
+      var all = list || [];
+      var q = homeQuery.trim().toLowerCase();
+      var visible = all.filter(function (b) {
+        return !q || String(b.name || '').toLowerCase().indexOf(q) >= 0;
+      });
+      // Favourites always float first; the chosen order applies within groups.
+      visible.sort(function (a, b) {
+        if (!!a.pinned !== !!b.pinned) return a.pinned ? -1 : 1;
+        if (homeSort === 'name') {
+          return String(a.name || '').localeCompare(String(b.name || ''), 'zh-Hans-CN');
+        }
+        if (homeSort === 'cards') return (b.cards || 0) - (a.cards || 0);
+        return String(b.savedAt || '').localeCompare(String(a.savedAt || ''));
+      });
       boardListEl.innerHTML = '';
-      (list || []).forEach(function (b) {
+      visible.forEach(function (b) {
         boardListEl.appendChild(homeCard(b));
       });
-      homeEmptyEl.hidden = (list || []).length > 0;
-      return list || [];
+      if (!all.length) {
+        homeEmptyEl.textContent = '还没有任何图，先新建一幅';
+      } else if (!visible.length) {
+        homeEmptyEl.textContent = '没有匹配「' + homeQuery.trim() + '」的图';
+      }
+      homeEmptyEl.hidden = visible.length > 0;
+      return all;
     });
   }
 
@@ -995,6 +1021,16 @@
       }
     });
   }
+
+  // Library search + sort.
+  if (homeSearchEl) homeSearchEl.addEventListener('input', function () {
+    homeQuery = homeSearchEl.value || '';
+    renderHome();
+  });
+  if (homeSortEl) homeSortEl.addEventListener('change', function () {
+    homeSort = homeSortEl.value || 'recent';
+    renderHome();
+  });
 
   newBoardBtn.addEventListener('click', function () {
     askName({ title: '新的一幅图', value: '' }).then(function (name) {
