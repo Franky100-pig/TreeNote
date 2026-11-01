@@ -1842,7 +1842,22 @@
       exportBoardPdf();
       return;
     }
-    if (editingId) return; // the editor owns the keyboard
+    // Web edition has no application menu, so Cmd/Ctrl+Z lives here. Desktop
+    // routes it through the menu (main.js) to keep native text undo working.
+    if (isWebPlatform && (e.metaKey || e.ctrlKey) &&
+        (e.key === 'z' || e.key === 'Z' || e.key === 'y' || e.key === 'Y')) {
+      if (isTypingTarget(e.target)) return; // let the field undo its own text
+      e.preventDefault();
+      if (e.key === 'y' || e.key === 'Y' || e.shiftKey) redo();
+      else undo();
+      return;
+    }
+    if (editingId) {
+      // The side panel owns the keyboard; Esc / Cmd+Enter finish editing.
+      if (e.key === 'Escape') { e.preventDefault(); commitEdit(); }
+      else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); commitEdit(); }
+      return;
+    }
     if ((e.key === 'Delete' || e.key === 'Backspace') && selectedId) {
       e.preventDefault();
       deleteCard(selectedId);

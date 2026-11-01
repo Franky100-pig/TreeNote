@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, dialog, Menu, screen } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -397,6 +397,51 @@ ipcMain.handle('export:pdf', async (event, filename, bytes) => {
   }
 });
 
+// ---- application menu -----------------------------------------------------
+// Electron's default Edit menu would swallow Cmd+Z and run the page's native
+// undo, which does nothing on the canvas. This menu routes Undo/Redo to the
+// canvas history — EXCEPT while a text field is focused, where it falls back to
+// the native text undo so typing in the side editor still behaves normally.
+function historyAction(kind) {
+  const win = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+  if (!win || win.isDestroyed()) return;
+  const fn = kind === 'undo' ? '__cardwallUndo' : '__cardwallRedo';
+  const expr =
+    '(function(){var el=document.activeElement;' +
+    "var typing=!!el&&(el.tagName==='INPUT'||el.tagName==='TEXTAREA'||el.isContentEditable);" +
+    "if(typing)return 'native';" +
+    'if(window.' + fn + '){window.' + fn + '();return "canvas";}' +
+    "return 'none';})()";
+  win.webContents.executeJavaScript(expr).then((res) => {
+    if (res === 'native') {
+      if (kind === 'undo') win.webContents.undo();
+      else win.webContents.redo();
+    }
+  }).catch(() => {});
+}
+
+function buildAppMenu() {
+  const isMac = process.platform === 'darwin';
+  const template = [
+    ...(isMac ? [{ role: 'appMenu' }] : []),
+    {
+      label: 'Edit',
+      submenu: [
+        { label: 'Undo', accelerator: 'CmdOrCtrl+Z', click: () => historyAction('undo') },
+        { label: 'Redo', accelerator: 'Shift+CmdOrCtrl+Z', click: () => historyAction('redo') },
+        { type: 'separator' },
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        { role: 'selectAll' }
+      ]
+    },
+    { role: 'viewMenu' },
+    ...(isMac ? [{ role: 'windowMenu' }] : [])
+  ];
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1280,
@@ -600,6 +645,7 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  buildAppMenu();
   createWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
