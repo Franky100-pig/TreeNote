@@ -85,7 +85,9 @@
         y: Number.isFinite(c.y) ? c.y : 0,
         parent: null,
         // Optional preset colour (whitelist, same as main.js); else null.
-        color: cleanColor(c.color)
+        color: cleanColor(c.color),
+        // Folded branch flag; anything but a real `true` -> open.
+        collapsed: c.collapsed === true
       });
     }
     // Second pass: parents may be declared after their children.

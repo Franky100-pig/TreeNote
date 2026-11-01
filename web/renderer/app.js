@@ -37,6 +37,15 @@
   var canvasHintEl = document.getElementById('canvas-hint');
   var toastEl = document.getElementById('toast');
 
+  // Side editor (Obsidian-style) + library tools.
+  var editorPanelEl = document.getElementById('editor');
+  var editorTitleEl = document.getElementById('editor-title');
+  var editorNoteEl = document.getElementById('editor-note');
+  var editorCloseEl = document.getElementById('editor-close');
+  var editorDeleteEl = document.getElementById('editor-delete');
+  var homeSearchEl = document.getElementById('home-search');
+  var homeSortEl = document.getElementById('home-sort');
+
   // ---- world setup -------------------------------------------------------
   // Preset card colours — a whitelist, so a hand-edited board file can never
   // inject an arbitrary value into the DOM (main.js sanitises to the same
@@ -80,7 +89,8 @@
         parent: item.parent || null,
         title: item.title,
         note: item.note || '',
-        color: item.color || null
+        color: item.color || null,
+        collapsed: item.collapsed === true
       });
     });
   }
@@ -132,6 +142,17 @@
       '</span>' +
       '<button data-act="del" title="删除节点" tabindex="-1" aria-label="删除节点">✕</button>';
     el.appendChild(toolbar);
+
+    // Fold toggle for a branch. Hidden on childless cards; syncDOM keeps the
+    // child count and the ▸/▾ arrow fresh. Always visible (not hover-only) so a
+    // folded branch reads as folded at a glance.
+    var fold = document.createElement('button');
+    fold.type = 'button';
+    fold.className = 'card-fold';
+    fold.dataset.act = 'fold';
+    fold.tabIndex = -1;
+    fold.hidden = true;
+    el.appendChild(fold);
 
     // Freeze the card while the pointer is over it so the bar never slides
     // out from under the cursor. The flag is read by the physics integrator;
@@ -200,11 +221,16 @@
     return { x: card.x + dx * s, y: card.y + dy * s };
   }
 
-  function updateEdges() {
+  function updateEdges(hidden) {
     edgeEls.forEach(function (path, childId) {
       var child = CardPhysics.findCard(world, childId);
+      if (!child || !child.parent) { path.style.display = 'none'; return; }
       var parent = CardPhysics.findCard(world, child.parent);
-      if (!child || !parent) return;
+      if (!parent || (hidden && (hidden.has(childId) || hidden.has(parent.id)))) {
+        path.style.display = 'none';
+        return;
+      }
+      path.style.display = '';
       var p1 = borderPoint(parent, child.x, child.y);
       var p2 = borderPoint(child, parent.x, parent.y);
       var dx = p2.x - p1.x, dy = p2.y - p1.y;
@@ -221,14 +247,38 @@
 
   // ---- per-frame DOM sync ---------------------------------------------------
   function syncDOM() {
+    // world._hidden is refreshed by computeTreeLayout on every physics step;
+    // fall back to a direct query for calls made outside the frame loop (e.g.
+    // right after a fold toggle).
+    var hidden = (world._hidden && typeof world._hidden.has === 'function')
+      ? world._hidden
+      : CardPhysics.hiddenSet(world);
+    var childCount = Object.create(null);
+    world.cards.forEach(function (c) {
+      if (c.parent) childCount[c.parent] = (childCount[c.parent] || 0) + 1;
+    });
     world.cards.forEach(function (card) {
       var el = cardEls.get(card.id);
-      if (el) {
-        el.style.transform =
-          'translate(-50%, -50%) translate(' + card.x.toFixed(2) + 'px, ' + card.y.toFixed(2) + 'px)';
+      if (!el) return;
+      var isHidden = hidden.has(card.id);
+      // display:none (not the `hidden` attribute) so card CSS cannot override it.
+      el.style.display = isHidden ? 'none' : '';
+      if (isHidden) return;
+      el.style.transform =
+        'translate(-50%, -50%) translate(' + card.x.toFixed(2) + 'px, ' + card.y.toFixed(2) + 'px)';
+      el.classList.toggle('collapsed', !!card.collapsed);
+      var fold = el.querySelector('.card-fold');
+      if (fold) {
+        var n = childCount[card.id] || 0;
+        fold.hidden = n === 0;
+        if (n) {
+          fold.textContent = (card.collapsed ? '▸ ' : '▾ ') + n;
+          fold.setAttribute('aria-expanded', card.collapsed ? 'false' : 'true');
+          fold.title = card.collapsed ? '展开子树' : '折叠子树';
+        }
       }
     });
-    updateEdges();
+    updateEdges(hidden);
   }
 
   // ---- persistence (C6) -------------------------------------------------------
@@ -251,7 +301,7 @@
       version: 1,
       tidy: !!world.tidy,
       cards: world.cards.map(function (c) {
-        return {
+        var out = {
           id: c.id,
           title: c.title,
           note: c.note,
@@ -260,6 +310,8 @@
           parent: c.parent || null,
           color: c.color || null
         };
+        if (c.collapsed) out.collapsed = true; // only store the flag when set
+        return out;
       })
     };
   }
@@ -466,6 +518,10 @@
     selectedId = null;
     editingId = null;
     worldPaused = false;
+    // A different board starts with a clean history.
+    undoStack.length = 0;
+    redoStack.length = 0;
+    closeEditorPanel();
     saveState.dirty = false;
     acc = 0;
     tween = null;
@@ -528,17 +584,37 @@
 
   // ---- lightweight feedback: toast / saved pill / first-run hint -----------
   var toastTimer = null;
-  function showToast(msg) {
+  var toastHideTimer = null;
+  function hideToast() {
     if (!toastEl) return;
-    toastEl.textContent = msg;
+    toastEl.classList.remove('show');
+    if (toastHideTimer) clearTimeout(toastHideTimer);
+    toastHideTimer = setTimeout(function () { toastEl.hidden = true; }, 260);
+  }
+  // Optional action button ("撤销") turns the toast into an undo affordance.
+  function showToast(msg, actionLabel, actionFn, duration) {
+    if (!toastEl) return;
+    toastEl.textContent = '';
+    var text = document.createElement('span');
+    text.textContent = msg;
+    toastEl.appendChild(text);
+    if (actionLabel) {
+      var act = document.createElement('button');
+      act.type = 'button';
+      act.className = 'toast-action';
+      act.textContent = actionLabel;
+      act.addEventListener('click', function () {
+        hideToast();
+        if (actionFn) actionFn();
+      });
+      toastEl.appendChild(act);
+    }
     toastEl.hidden = false;
     void toastEl.offsetWidth; // restart the fade-in even on rapid repeats
     toastEl.classList.add('show');
     if (toastTimer) clearTimeout(toastTimer);
-    toastTimer = setTimeout(function () {
-      toastEl.classList.remove('show');
-      toastTimer = setTimeout(function () { toastEl.hidden = true; }, 260);
-    }, 2200);
+    if (toastHideTimer) clearTimeout(toastHideTimer);
+    toastTimer = setTimeout(hideToast, duration || 2200);
   }
 
   var saveStatusTimer = null;
@@ -659,18 +735,41 @@
     return (d.getMonth() + 1) + '月' + d.getDate() + '日';
   }
 
+  // Library view state (session only — the order/filter is a view preference).
+  var homeQuery = '';
+  var homeSort = 'recent';
+
   function renderHome() {
     if (!window.cardwall || typeof window.cardwall.listBoards !== 'function') {
       homeEmptyEl.hidden = false;
       return Promise.resolve([]);
     }
     return window.cardwall.listBoards().then(function (list) {
+      var all = list || [];
+      var q = homeQuery.trim().toLowerCase();
+      var visible = all.filter(function (b) {
+        return !q || String(b.name || '').toLowerCase().indexOf(q) >= 0;
+      });
+      // Favourites always float first; the chosen order applies within groups.
+      visible.sort(function (a, b) {
+        if (!!a.pinned !== !!b.pinned) return a.pinned ? -1 : 1;
+        if (homeSort === 'name') {
+          return String(a.name || '').localeCompare(String(b.name || ''), 'zh-Hans-CN');
+        }
+        if (homeSort === 'cards') return (b.cards || 0) - (a.cards || 0);
+        return String(b.savedAt || '').localeCompare(String(a.savedAt || ''));
+      });
       boardListEl.innerHTML = '';
-      (list || []).forEach(function (b) {
+      visible.forEach(function (b) {
         boardListEl.appendChild(homeCard(b));
       });
-      homeEmptyEl.hidden = (list || []).length > 0;
-      return list || [];
+      if (!all.length) {
+        homeEmptyEl.textContent = '还没有任何图，先新建一幅';
+      } else if (!visible.length) {
+        homeEmptyEl.textContent = '没有匹配「' + homeQuery.trim() + '」的图';
+      }
+      homeEmptyEl.hidden = visible.length > 0;
+      return all;
     });
   }
 
@@ -901,6 +1000,38 @@
   if (tidyBtn) tidyBtn.addEventListener('click', function () { tidyAll(); });
   var exportPdfBtn = document.getElementById('export-pdf-btn');
   if (exportPdfBtn) exportPdfBtn.addEventListener('click', function () { exportBoardPdf(); });
+
+  // Side editor wiring: live sync, finish, delete, and Enter-to-note.
+  if (editorCloseEl) editorCloseEl.addEventListener('click', function () { commitEdit(); });
+  if (editorDeleteEl) editorDeleteEl.addEventListener('click', function () {
+    if (editingId) deleteCard(editingId);
+  });
+  if (editorTitleEl) {
+    editorTitleEl.addEventListener('input', applyEditorInput);
+    editorTitleEl.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { e.preventDefault(); editorNoteEl.focus(); }
+    });
+  }
+  if (editorNoteEl) {
+    editorNoteEl.addEventListener('input', applyEditorInput);
+    editorNoteEl.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' || (e.key === 'Enter' && (e.metaKey || e.ctrlKey))) {
+        e.preventDefault();
+        commitEdit();
+      }
+    });
+  }
+
+  // Library search + sort.
+  if (homeSearchEl) homeSearchEl.addEventListener('input', function () {
+    homeQuery = homeSearchEl.value || '';
+    renderHome();
+  });
+  if (homeSortEl) homeSortEl.addEventListener('change', function () {
+    homeSort = homeSortEl.value || 'recent';
+    renderHome();
+  });
+
   newBoardBtn.addEventListener('click', function () {
     askName({ title: '新的一幅图', value: '' }).then(function (name) {
       if (name == null) return;
@@ -974,69 +1105,213 @@
     if (el) el.classList.add('selected');
   }
 
-  function editorEls(id) {
-    var el = cardEls.get(id);
-    if (!el) return null;
+  // ---- undo / redo ---------------------------------------------------------
+  // A small command stack over DISCRETE actions (a drop, a colour pick, a
+  // create, a delete, a re-parent). Physics and live typing are never recorded.
+  // Undo/redo rebuilds the world DOM afterwards — cheap at these board sizes
+  // and far less error-prone than patching every edge case in place.
+  var undoStack = [];
+  var redoStack = [];
+  var MAX_HISTORY = 60;
+  var historyApplying = false;
+
+  function snapshotCard(c) {
     return {
-      el: el,
-      title: el.querySelector('.card-title'),
-      note: el.querySelector('.card-note')
+      id: c.id, title: c.title, note: c.note, x: c.x, y: c.y,
+      parent: c.parent || null, color: c.color || null,
+      collapsed: c.collapsed === true
     };
   }
 
-  function caretToEnd(elm) {
-    var range = document.createRange();
-    range.selectNodeContents(elm);
-    range.collapse(false);
-    var sel = window.getSelection();
-    sel.removeAllRanges();
-    sel.addRange(range);
+  function addCardFromSnapshot(s) {
+    return CardPhysics.addCard(world, {
+      id: s.id, x: s.x, y: s.y, parent: s.parent, title: s.title,
+      note: s.note || '', color: s.color || null, collapsed: s.collapsed === true
+    });
   }
 
-  // Editing pauses the world: with Brownian drift running, the text would
-  // slide under the caret. Pause/resume is the whole focus-mode contract.
-  function startEdit(card) {
-    if (!card || editingId === card.id) return;
+  function isTypingTarget(el) {
+    return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
+  }
+
+  function pushHistory(cmd) {
+    if (historyApplying || !cmd) return;
+    undoStack.push(cmd);
+    if (undoStack.length > MAX_HISTORY) undoStack.shift();
+    redoStack.length = 0;
+  }
+
+  function resyncBoard() {
+    cardEls.forEach(function (el) { el.remove(); });
+    cardEls.clear();
+    edgeEls.forEach(function (p) { p.remove(); });
+    edgeEls.clear();
+    // The editor's target may have been removed by the command.
+    editingId = null;
+    worldPaused = false;
+    editStart = null;
+    closeEditorPanel();
+    CardPhysics.computeTreeLayout(world);
+    buildDOM();
+    world.cards.forEach(measure);
+    if (selectedId && !CardPhysics.findCard(world, selectedId)) selectedId = null;
+    syncDOM();
+    if (selectedId && cardEls.get(selectedId)) cardEls.get(selectedId).classList.add('selected');
+  }
+
+  function applyHistory(kind) {
     if (editingId) commitEdit();
-    var parts = editorEls(card.id);
-    if (!parts) return;
-    editingId = card.id;
-    worldPaused = true;
-    parts.el.classList.add('editing');
-    parts.title.contentEditable = 'plaintext-only';
-    parts.note.contentEditable = 'plaintext-only';
-    parts.title.focus();
-    caretToEnd(parts.title);
+    var from = kind === 'undo' ? undoStack : redoStack;
+    var to = kind === 'undo' ? redoStack : undoStack;
+    var cmd = from.pop();
+    if (!cmd) return false;
+    historyApplying = true;
+    try { cmd[kind](); } finally { historyApplying = false; }
+    to.push(cmd);
+    resyncBoard();
+    markDirty();
+    return true;
   }
 
-  function cancelEdit() {
+  function undo() { return applyHistory('undo'); }
+  function redo() { return applyHistory('redo'); }
+
+  // Undo one SPECIFIC command (the delete toast targets the delete it announced,
+  // even if other actions happened in between).
+  function undoCommand(cmd) {
+    var i = undoStack.indexOf(cmd);
+    if (i < 0) return false;
+    if (editingId) commitEdit();
+    undoStack.splice(i, 1);
+    historyApplying = true;
+    try { cmd.undo(); } finally { historyApplying = false; }
+    redoStack.push(cmd);
+    resyncBoard();
+    markDirty();
+    return true;
+  }
+
+  // Desktop routes Cmd+Z through the app menu (see main.js); the web edition
+  // has no menu, so its keydown handler calls these directly.
+  window.__cardwallUndo = function () { return undo(); };
+  window.__cardwallRedo = function () { return redo(); };
+  window.__cardwallHistoryInfo = function () {
+    return { undo: undoStack.length, redo: redoStack.length };
+  };
+
+  // Editing opens a docked side panel (Obsidian-style). The card is updated
+  // live as you type; the panel has room for long notes and keeps the canvas
+  // gestures alive. Physics pauses while the panel is open so the card doesn't
+  // drift under your cursor.
+  var editStart = null; // { title, note } captured when the panel opens
+
+  function startEdit(card) {
+    if (!card) return;
+    if (editingId === card.id && editorPanelEl && !editorPanelEl.hidden) {
+      editorTitleEl.focus();
+      return;
+    }
+    if (editingId) commitEdit();
+    var el = cardEls.get(card.id);
+    if (!el) return;
+    editingId = card.id;
+    editStart = { title: card.title, note: card.note };
+    worldPaused = true;
+    el.classList.add('editing');
+    raise(el);
+    if (editorPanelEl) {
+      editorTitleEl.value = (card.title && card.title !== '未命名') ? card.title : '';
+      editorNoteEl.value = card.note || '';
+      editorPanelEl.hidden = false;
+      // Next frame so the slide-in transition actually runs.
+      requestAnimationFrame(function () { editorPanelEl.classList.add('open'); });
+      editorTitleEl.focus();
+      var len = editorTitleEl.value.length;
+      try { editorTitleEl.setSelectionRange(len, len); } catch (err) { /* noop */ }
+    }
+  }
+
+  // Live-sync the card while typing (the wall should feel like a preview).
+  function applyEditorInput() {
     if (!editingId) return;
     var card = CardPhysics.findCard(world, editingId);
-    var parts = editorEls(editingId);
-    if (card && parts) {
-      parts.title.textContent = card.title;
-      parts.note.textContent = card.note;
-    }
-    commitEdit();
+    var el = cardEls.get(editingId);
+    if (!card || !el) return;
+    card.title = editorTitleEl.value;
+    card.note = editorNoteEl.value;
+    var t = el.querySelector('.card-title');
+    var n = el.querySelector('.card-note');
+    if (t) t.textContent = card.title;
+    if (n) n.textContent = card.note;
+    measure(card); // text reflow can change the card size -> edge endpoints
+    markDirty();
+    syncDOM();
+  }
+
+  function closeEditorPanel() {
+    if (!editorPanelEl) return;
+    editorPanelEl.classList.remove('open');
+    setTimeout(function () {
+      if (!editorPanelEl.classList.contains('open')) editorPanelEl.hidden = true;
+    }, 230);
   }
 
   function commitEdit() {
     if (!editingId) return;
     var id = editingId;
     var card = CardPhysics.findCard(world, id);
-    var parts = editorEls(id);
+    var el = cardEls.get(id);
     editingId = null;
     worldPaused = false;
-    if (!card || !parts) return;
-    card.title = (parts.title.textContent || '').trim() || '未命名';
-    card.note = (parts.note.textContent || '').trim();
-    parts.title.textContent = card.title;
-    parts.note.textContent = card.note;
-    parts.title.contentEditable = 'false';
-    parts.note.contentEditable = 'false';
-    parts.el.classList.remove('editing');
-    measure(card); // text reflow can change the card size -> edge endpoints
-    markDirty();
+    editStart = null;
+    if (card) {
+      card.title = (editorTitleEl.value || '').trim() || '未命名';
+      card.note = (editorNoteEl.value || '').trim();
+      if (el) {
+        var t = el.querySelector('.card-title');
+        var n = el.querySelector('.card-note');
+        if (t) t.textContent = card.title;
+        if (n) n.textContent = card.note;
+        el.classList.remove('editing');
+      }
+      measure(card);
+      markDirty();
+      // If this card was just created, refresh its create-command snapshot so
+      // a later undo/redo restores what the user actually wrote, not a blank.
+      for (var hi = undoStack.length - 1; hi >= 0; hi--) {
+        var hcmd = undoStack[hi];
+        if (hcmd.type === 'create' && hcmd.id === card.id) {
+          hcmd.snapshot = snapshotCard(card);
+          break;
+        }
+      }
+    }
+    closeEditorPanel();
+    syncDOM();
+  }
+
+  function cancelEdit() {
+    if (!editingId) return;
+    var id = editingId;
+    var card = CardPhysics.findCard(world, id);
+    var el = cardEls.get(id);
+    if (card && editStart) {
+      card.title = editStart.title;
+      card.note = editStart.note;
+      if (el) {
+        var t = el.querySelector('.card-title');
+        var n = el.querySelector('.card-note');
+        if (t) t.textContent = card.title;
+        if (n) n.textContent = card.note;
+      }
+      measure(card);
+      markDirty();
+    }
+    if (el) el.classList.remove('editing');
+    editingId = null;
+    worldPaused = false;
+    editStart = null;
+    closeEditorPanel();
     syncDOM();
   }
 
@@ -1103,13 +1378,39 @@
   function reparent(card, targetId) {
     if (!card || !targetId || targetId === card.id) return false;
     if (isAncestor(card.id, targetId)) return false; // would close a cycle
+    var from = card.parent || null;
+    if (from === targetId) return false; // already hangs there
     card.parent = targetId;
     addEdgePath(card);
     var el = cardEls.get(card.id);
     if (el) el.classList.remove('card-root');
+    var id = card.id;
+    pushHistory({
+      type: 'reparent',
+      undo: function () { var c = CardPhysics.findCard(world, id); if (c) c.parent = from; },
+      redo: function () { var c = CardPhysics.findCard(world, id); if (c) c.parent = targetId; }
+    });
     markDirty();
     syncDOM();
     return true;
+  }
+
+  // Fold / unfold a branch. A folded card stays visible but is packed as a
+  // leaf; its whole subtree is hidden from layout, picking and export. In tidy
+  // mode every card is woken so the tree closes the gap right away.
+  function toggleCollapse(id) {
+    var card = CardPhysics.findCard(world, id);
+    if (!card) return;
+    var hasChild = world.cards.some(function (c) { return c.parent === id; });
+    if (!hasChild) return;
+    card.collapsed = !card.collapsed;
+    CardPhysics.computeTreeLayout(world); // refresh world._hidden + offsets
+    if (world.tidy) {
+      world.cards.forEach(function (c) { c.awake = true; c.still = 0; });
+    }
+    if (selectedId && world._hidden && world._hidden.has(selectedId)) select(null);
+    markDirty();
+    syncDOM();
   }
 
   function createCard(worldPoint, parentId) {
@@ -1148,6 +1449,20 @@
     markDirty();
     syncDOM();
     hideCanvasHint();
+    var snap = snapshotCard(card);
+    var createCmd = {
+      type: 'create',
+      id: snap.id,
+      snapshot: snap,
+      undo: function () {
+        if (editingId === snap.id) {
+          editingId = null; worldPaused = false; editStart = null; closeEditorPanel();
+        }
+        CardPhysics.removeCard(world, snap.id);
+      },
+      redo: function () { addCardFromSnapshot(createCmd.snapshot); }
+    };
+    pushHistory(createCmd);
     startEdit(card);
     return card;
   }
@@ -1160,6 +1475,7 @@
   function onGrab(card) {
     if (!card) return;
     world.dragId = card.id;
+    card._dragStart = { x: card.x, y: card.y }; // for the undo move command
     wakeBranch(card.id);
     hideCanvasHint();
   }
@@ -1175,6 +1491,23 @@
     if (!card) return;
     world.tidy = false;
     world.dragId = null;
+    var start = card._dragStart;
+    card._dragStart = null;
+    if (start && (Math.abs(start.x - card.x) > 0.5 || Math.abs(start.y - card.y) > 0.5)) {
+      var id = card.id;
+      var to = { x: card.x, y: card.y };
+      pushHistory({
+        type: 'move',
+        undo: function () {
+          var c = CardPhysics.findCard(world, id);
+          if (c) { c.x = start.x; c.y = start.y; c.awake = true; c.still = 0; }
+        },
+        redo: function () {
+          var c = CardPhysics.findCard(world, id);
+          if (c) { c.x = to.x; c.y = to.y; c.awake = true; c.still = 0; }
+        }
+      });
+    }
     markDirty();
   }
 
@@ -1206,11 +1539,18 @@
   // as on screen) and wrapped in a dependency-free PDF. Desktop routes the
   // bytes through the main process for a native "Save As" dialog; the web
   // edition downloads them directly in the browser.
+  // Cards the user can actually see: a folded branch is excluded from export
+  // so the PDF matches the screen (a hidden subtree must not inflate the page).
+  function visibleCards() {
+    var hidden = CardPhysics.hiddenSet(world);
+    return world.cards.filter(function (c) { return !hidden.has(c.id); });
+  }
+
   function exportBoardPdf() {
     if (!window.CardwallExport || !window.CardwallPdf) return;
     var themeAttr = document.documentElement.getAttribute('data-theme');
     var themeName = themeAttr === 'light' ? 'light' : 'dark';
-    var render = window.CardwallExport.renderBoardToPdf(world.cards, {
+    var render = window.CardwallExport.renderBoardToPdf(visibleCards(), {
       theme: themeName, title: currentBoard.name, dpi: 300
     });
     window.CardwallExport.buildPdfFromCanvas(render, 0.95).then(function (pdfBytes) {
@@ -1251,7 +1591,8 @@
         }
         var themeAttr = document.documentElement.getAttribute('data-theme');
         var themeName = themeAttr === 'light' ? 'light' : 'dark';
-        var render = window.CardwallExport.renderBoardToPdf(world.cards, {
+        var vis = visibleCards();
+        var render = window.CardwallExport.renderBoardToPdf(vis, {
           theme: themeName, title: currentBoard.name
         });
         window.CardwallExport.buildPdfFromCanvas(render, 0.92).then(function (bytes) {
@@ -1261,7 +1602,7 @@
             ok: bytes.length > 100 && head.indexOf('%PDF') === 0,
             bytesLen: bytes.length, header: head,
             pageW: render.pageW, pageH: render.pageH,
-            cards: world.cards.length
+            cards: vis.length
           });
         }).catch(function (e) { resolve({ ok: false, error: String(e) }); });
       } catch (e) { resolve({ ok: false, error: String(e) }); }
@@ -1271,6 +1612,11 @@
   function deleteCard(id) {
     var card = CardPhysics.findCard(world, id);
     if (!card) return;
+    var snap = snapshotCard(card);
+    var childrenIds = world.cards
+      .filter(function (c) { return c.parent === id; })
+      .map(function (c) { return c.id; });
+    var title = card.title || '未命名';
     // Re-parent children to the deleted card's parent so the tree stays
     // connected instead of silently losing a whole subtree.
     world.cards.forEach(function (c) {
@@ -1284,9 +1630,30 @@
     removeEdgePath(id);
     CardPhysics.removeCard(world, id);
     if (selectedId === id) selectedId = null;
-    if (editingId === id) { editingId = null; worldPaused = false; }
+    if (editingId === id) {
+      editingId = null; worldPaused = false; editStart = null; closeEditorPanel();
+    }
+    var cmd = {
+      type: 'delete',
+      undo: function () {
+        addCardFromSnapshot(snap);
+        childrenIds.forEach(function (cid) {
+          var ch = CardPhysics.findCard(world, cid);
+          if (ch) ch.parent = snap.id;
+        });
+      },
+      redo: function () {
+        childrenIds.forEach(function (cid) {
+          var ch = CardPhysics.findCard(world, cid);
+          if (ch) ch.parent = snap.parent || null;
+        });
+        CardPhysics.removeCard(world, snap.id);
+      }
+    };
+    pushHistory(cmd);
     markDirty();
     syncDOM();
+    showToast('已删除「' + title + '」', '撤销', function () { undoCommand(cmd); }, 5000);
   }
 
   // ---- card colours --------------------------------------------------------
@@ -1298,12 +1665,18 @@
     if (!card) return;
     var next = CARD_COLORS.indexOf(color) >= 0 ? color : null;
     if (card.color === next) return;
+    var from = card.color || null;
     card.color = next;
     var el = cardEls.get(id);
     if (el) {
       if (next) el.dataset.color = next;
       else delete el.dataset.color;
     }
+    pushHistory({
+      type: 'color',
+      undo: function () { var c = CardPhysics.findCard(world, id); if (c) c.color = from; },
+      redo: function () { var c = CardPhysics.findCard(world, id); if (c) c.color = next; }
+    });
     markDirty();
     syncDOM();
   }
@@ -1322,7 +1695,13 @@
     // is handled by the click listener below, which runs after pointerdown).
     if (!(e.target.closest && e.target.closest('.card-color-wrap'))) closeAllPalettes();
     var cardEl = e.target.closest ? e.target.closest('.card') : null;
-    if (editingId && (!cardEl || cardEl.dataset.id !== editingId)) commitEdit();
+    // Docked side panel: clicking empty canvas keeps it open (so you can pan
+    // while writing); clicking ANOTHER card switches the panel to that card.
+    if (editingId && cardEl && cardEl.dataset.id !== editingId) {
+      var nextCard = CardPhysics.findCard(world, cardEl.dataset.id);
+      commitEdit();
+      if (nextCard) startEdit(nextCard);
+    }
     select(cardEl ? cardEl.dataset.id : null);
   });
 
@@ -1330,7 +1709,7 @@
   // (child of the selection, if any). Toolbar buttons have their own click
   // handlers and must not also trigger a double-click edit.
   viewport.addEventListener('dblclick', function (e) {
-    if (e.target.closest && e.target.closest('.card-toolbar')) return;
+    if (e.target.closest && (e.target.closest('.card-toolbar') || e.target.closest('.card-fold'))) return;
     var cardEl = e.target.closest ? e.target.closest('.card') : null;
     if (cardEl) {
       var card = CardPhysics.findCard(world, cardEl.dataset.id);
@@ -1352,6 +1731,14 @@
   // interaction.js already declines to drag/pan when the press lands on the
   // toolbar, so here we only need to act on the click.
   viewport.addEventListener('click', function (e) {
+    var foldBtn = e.target.closest ? e.target.closest('.card-fold') : null;
+    if (foldBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+      var foldEl = foldBtn.closest('.card');
+      if (foldEl) toggleCollapse(foldEl.dataset.id);
+      return;
+    }
     var btn = e.target.closest ? e.target.closest('.card-toolbar button') : null;
     if (!btn) return;
     e.preventDefault();
@@ -1386,33 +1773,10 @@
     }
   });
 
-  viewport.addEventListener('keydown', function (e) {
-    if (!editingId) return;
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      cancelEdit();
-    } else if (e.key === 'Enter' && e.target.classList && e.target.classList.contains('card-title')) {
-      e.preventDefault();
-      commitEdit();
-    }
-  });
-
   viewport.addEventListener('input', function () {
     if (!editingId) return;
     var card = CardPhysics.findCard(world, editingId);
     if (card) { measure(card); syncDOM(); }
-  });
-
-  // Commit when focus leaves the edited card entirely (title <-> note moves
-  // must not commit, so check the card containment on the next tick).
-  viewport.addEventListener('focusout', function () {
-    if (!editingId) return;
-    setTimeout(function () {
-      if (!editingId) return;
-      var el = cardEls.get(editingId);
-      if (el && document.activeElement && el.contains(document.activeElement)) return;
-      commitEdit();
-    }, 0);
   });
 
   // ---- theme ---------------------------------------------------------------
@@ -1514,7 +1878,22 @@
       exportBoardPdf();
       return;
     }
-    if (editingId) return; // the editor owns the keyboard
+    // Web edition has no application menu, so Cmd/Ctrl+Z lives here. Desktop
+    // routes it through the menu (main.js) to keep native text undo working.
+    if (isWebPlatform && (e.metaKey || e.ctrlKey) &&
+        (e.key === 'z' || e.key === 'Z' || e.key === 'y' || e.key === 'Y')) {
+      if (isTypingTarget(e.target)) return; // let the field undo its own text
+      e.preventDefault();
+      if (e.key === 'y' || e.key === 'Y' || e.shiftKey) redo();
+      else undo();
+      return;
+    }
+    if (editingId) {
+      // The side panel owns the keyboard; Esc / Cmd+Enter finish editing.
+      if (e.key === 'Escape') { e.preventDefault(); commitEdit(); }
+      else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); commitEdit(); }
+      return;
+    }
     if ((e.key === 'Delete' || e.key === 'Backspace') && selectedId) {
       e.preventDefault();
       deleteCard(selectedId);
@@ -1909,15 +2288,20 @@
     pointer(rootEl, 'pointerup', rc.x, rc.y);
     dbl(rootEl, rc.x, rc.y);
     var editStarted = editingId === rootId && worldPaused &&
-      document.querySelectorAll('.card.editing').length === 1;
+      document.querySelectorAll('.card.editing').length === 1 &&
+      !!editorPanelEl && !editorPanelEl.hidden;
 
-    // 2. typing + Enter commits the title and resumes the world
-    var titleEl = rootEl.querySelector('.card-title');
-    titleEl.textContent = '已编辑标题';
-    key(titleEl, 'Enter');
-    var committed = CardPhysics.findCard(world, rootId).title === '已编辑标题' &&
+    // 2. typing in the side panel updates the card live; Esc commits and
+    //    resumes the world (the panel slides closed).
+    editorTitleEl.value = '已编辑标题';
+    editorTitleEl.dispatchEvent(new Event('input', { bubbles: true }));
+    var liveSynced = CardPhysics.findCard(world, rootId).title === '已编辑标题';
+    key(window, 'Escape');
+    var committed = liveSynced &&
+      CardPhysics.findCard(world, rootId).title === '已编辑标题' &&
       editingId === null && !worldPaused &&
-      document.querySelectorAll('.card.editing').length === 0;
+      document.querySelectorAll('.card.editing').length === 0 &&
+      !editorPanelEl.classList.contains('open');
 
     // 3. double-click just outside a card -> new card attached to the nearest node
     // (normalize the view first: earlier checks leave it zoomed/panned)
@@ -1954,7 +2338,7 @@
     var created = world.cards.length === before + 1 && newId !== null &&
       expectParent !== null &&
       CardPhysics.findCard(world, newId).parent === expectParent;
-    key(document.querySelector('.card.editing .card-title'), 'Escape'); // commit (empty -> 未命名)
+    key(window, 'Escape'); // commit the new card (empty -> 未命名)
 
     // 4. Delete removes the selected card, its element and its edge path
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true }));
@@ -2098,6 +2482,41 @@
       (exportBtnEl.compareDocumentPosition(guidanceBtnEl) &
         Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
 
+    // Undo/redo round trip (v0.10): create a throwaway child, undo the create,
+    // redo it, then delete it so the board is left as we found it.
+    if (editingId) commitEdit();
+    var hBefore = world.cards.length;
+    var hCard = createCard({ x: 0, y: 0 }, rootId);
+    var hId = hCard ? hCard.id : null;
+    if (editingId) commitEdit();
+    var made = !!hId && world.cards.length === hBefore + 1;
+    window.__cardwallUndo();
+    var undone = made && world.cards.length === hBefore && !CardPhysics.findCard(world, hId);
+    window.__cardwallRedo();
+    var redone = made && world.cards.length === hBefore + 1 && !!CardPhysics.findCard(world, hId);
+    var historyOk = made && undone && redone;
+    if (historyOk && CardPhysics.findCard(world, hId)) deleteCard(hId); // clean up
+
+    // Fold/unfold round trip (v0.10): a card with children shows the badge;
+    // folding hides its descendants from layout, unfolding brings them back.
+    var rootEl2 = document.querySelector('.card[data-id="root"]') || document.querySelector('.card');
+    var rootCard2 = rootEl2 ? CardPhysics.findCard(world, rootEl2.dataset.id) : null;
+    var foldOk = false;
+    if (rootCard2) {
+      var kids2 = world.cards.filter(function (c) { return c.parent === rootCard2.id; });
+      var badge = rootEl2.querySelector('.card-fold');
+      var badgeShown = !!badge && !badge.hidden;
+      if (kids2.length && badge) {
+        toggleCollapse(rootCard2.id);
+        var hid = rootCard2.collapsed === true &&
+          CardPhysics.hiddenSet(world).has(kids2[0].id);
+        toggleCollapse(rootCard2.id);
+        var back = rootCard2.collapsed === false &&
+          !CardPhysics.hiddenSet(world).has(kids2[0].id);
+        foldOk = badgeShown && hid && back;
+      }
+    }
+
     // Brand + feedback surfaces (v0.9.2): the product reads as TreeNote in the
     // toolbar, the desktop has a saved-status slot, and the web-only banner must
     // stay HIDDEN on the desktop build (it would be an outright lie there).
@@ -2112,7 +2531,7 @@
     return {
       ok: hasBar && editOk && addOk && delOk && tidyFeedback && colorOk &&
         exportTagOk && exportClickable && exportLeftOfGuidance &&
-        brandOk && saveStatusOk && webBannerOk,
+        brandOk && saveStatusOk && webBannerOk && historyOk && foldOk,
       hasBar: hasBar,
       editOk: editOk,
       addOk: addOk,
@@ -2124,7 +2543,9 @@
       exportLeftOfGuidance: exportLeftOfGuidance,
       brandOk: brandOk,
       saveStatusOk: saveStatusOk,
-      webBannerOk: webBannerOk
+      webBannerOk: webBannerOk,
+      historyOk: historyOk,
+      foldOk: foldOk
     };
   };
 

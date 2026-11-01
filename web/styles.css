@@ -1146,3 +1146,213 @@ body {
 }
 #toast.show { opacity: 1; }
 #toast[hidden] { display: none; }
+
+/* Action button inside a toast (e.g. "撤销" after a delete). The toast itself
+   is pointer-events:none so it never blocks the canvas; the button opts back in. */
+.toast-action {
+  pointer-events: auto;
+  margin-left: 10px;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 7px;
+  border: 1px solid var(--accent-soft);
+  background: var(--accent-soft);
+  color: var(--ink);
+  cursor: pointer;
+}
+.toast-action:hover { border-color: var(--accent-strong); }
+
+/* ==== v0.10: fold toggle, side editor, library tools ===================== */
+
+/* Fold badge, hanging just below the card's bottom-right corner so it never
+   covers the title/note text. Only rendered when the card has children. */
+.card-fold {
+  position: absolute;
+  right: 6px;
+  bottom: -13px;
+  z-index: 5;
+  height: 21px;
+  min-width: 34px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid var(--surface-border);
+  background: var(--surface);
+  color: var(--muted);
+  font: 600 11px/1 -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+  letter-spacing: 0;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: auto;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.card-fold:hover {
+  color: var(--ink);
+  border-color: var(--accent-soft);
+  background: var(--accent-soft);
+}
+.card.collapsed > .card-fold {
+  color: var(--accent-strong);
+  border-color: var(--accent-strong);
+}
+/* A folded branch reads as "cut" at a glance. */
+.card.collapsed {
+  border-style: dashed;
+}
+
+/* ---- Obsidian-style side editor -------------------------------------------
+   A docked right-hand panel. The canvas keeps its gestures (the panel only
+   covers the right edge), and the card updates live as you type. */
+#editor {
+  position: fixed;
+  top: 44px;
+  right: 0;
+  bottom: 0;
+  width: 380px;
+  max-width: 94vw;
+  z-index: 18;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel-bg);
+  border-left: 1px solid var(--surface-border);
+  box-shadow: -8px 0 24px var(--shadow);
+  transform: translateX(100%);
+  transition: transform 0.22s ease;
+  pointer-events: auto;
+}
+#editor.open { transform: translateX(0); }
+#editor[hidden] { display: none; }
+
+.editor-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--surface-border);
+}
+.editor-kicker {
+  font-size: 11.5px;
+  letter-spacing: 0.6px;
+  color: var(--muted);
+}
+#editor-close {
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  border: 1px solid var(--surface-border);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+}
+#editor-close:hover { color: var(--ink); background: var(--accent-soft); }
+
+.editor-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px;
+  overflow: auto;
+}
+.editor-label {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 4px;
+}
+#editor-title,
+#editor-note {
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--surface-border);
+  border-radius: 9px;
+  padding: 9px 10px;
+  outline: none;
+}
+#editor-title { font-size: 15px; font-weight: 600; }
+#editor-note {
+  flex: 1;
+  min-height: 200px;
+  resize: none;
+  font-size: 14px;
+  line-height: 1.65;
+}
+#editor-title:focus,
+#editor-note:focus {
+  border-color: var(--accent-soft);
+  box-shadow: 0 0 0 2px var(--accent-soft-ring);
+}
+.editor-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding-top: 6px;
+}
+.editor-hint { font-size: 11.5px; color: var(--muted); }
+#editor-delete {
+  font: inherit;
+  font-size: 12.5px;
+  padding: 6px 11px;
+  border-radius: 8px;
+  border: 1px solid var(--surface-border);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+#editor-delete:hover {
+  color: #ff8585;
+  border-color: rgba(255, 90, 90, 0.5);
+  background: rgba(255, 90, 90, 0.12);
+}
+
+/* ---- library search + sort ------------------------------------------------ */
+.home-tools {
+  display: flex;
+  gap: 10px;
+  margin: 2px 0 18px;
+}
+#home-search {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: 14px;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--surface-border);
+  border-radius: 9px;
+  padding: 9px 12px;
+  outline: none;
+}
+#home-search:focus {
+  border-color: var(--accent-soft);
+  box-shadow: 0 0 0 2px var(--accent-soft-ring);
+}
+#home-sort {
+  font: inherit;
+  font-size: 13px;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--surface-border);
+  border-radius: 9px;
+  padding: 9px 10px;
+  cursor: pointer;
+  outline: none;
+}
+
+@media (max-width: 720px) {
+  #editor {
+    width: 100vw;
+    max-width: 100vw;
+  }
+  .home-tools { flex-direction: column; }
+  #editor-note { min-height: 150px; }
+}

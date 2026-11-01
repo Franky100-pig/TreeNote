@@ -143,6 +143,9 @@
     card.vy = card.vy || 0;
     card.w = card.w || world.config.cardWidth;
     card.h = card.h || world.config.cardHeight;
+    // Folded branch: a collapsed card still draws, but its descendants are
+    // hidden from layout, picking and export (mind-map "fold").
+    card.collapsed = card.collapsed === true;
     card.dragging = false;
     card.awake = card.awake === undefined ? true : !!card.awake;
     card.still = 0;              // consecutive quiet steps (see dormancy)
@@ -180,12 +183,44 @@
    * where `base` is the primary root's current position (root drag) or the
    * lean point (child drag).
    */
+  // Which cards are hidden because an ancestor is collapsed? A collapsed
+  // card's children (and everything below them) vanish; the collapsed card
+  // itself stays visible and is treated as a leaf by the layout.
+  // O(n * depth): builds one id index instead of calling findCard per hop.
+  function computeHidden(world, byId) {
+    var hidden = new Set();
+    var anyCollapsed = false;
+    for (var i = 0; i < world.cards.length; i++) {
+      if (world.cards[i].collapsed) { anyCollapsed = true; break; }
+    }
+    if (!anyCollapsed) return hidden;
+    for (var j = 0; j < world.cards.length; j++) {
+      var c = world.cards[j];
+      if (!c.parent) continue;
+      var cur = c;
+      var guard = 0;
+      while (cur && cur.parent && guard++ < 4000) {
+        var p = byId.get(cur.parent);
+        if (!p) break;
+        if (p.collapsed) { hidden.add(c.id); break; }
+        cur = p;
+      }
+    }
+    return hidden;
+  }
+
   function computeTreeLayout(world) {
     var cfg = world.config;
+    var byId = new Map();
+    world.cards.forEach(function (c) { byId.set(c.id, c); });
+    var hidden = computeHidden(world, byId);
+    world._hidden = hidden;
     var byParent = new Map();
     var roots = [];
     world.cards.forEach(function (c) {
-      if (c.parent && findCard(world, c.parent)) {
+      if (hidden.has(c.id)) return; // folded away: neither laid out nor drawn
+      var parent = c.parent ? byId.get(c.parent) : null;
+      if (parent && !hidden.has(parent.id)) {
         if (!byParent.has(c.parent)) byParent.set(c.parent, []);
         byParent.get(c.parent).push(c);
       } else {
@@ -224,7 +259,7 @@
     // assumes the primary root's offset is zero).
     if (roots.length) {
       var shift = -roots[0]._ox;
-      world.cards.forEach(function (c) { c._ox += shift; });
+      world.cards.forEach(function (c) { if (!hidden.has(c.id)) c._ox += shift; });
     }
     world._roots = roots;
     return roots;
@@ -293,6 +328,9 @@
     world.time += dt;
 
     computeTreeLayout(world);
+    // Cards inside a folded branch are frozen: they neither push, get pulled,
+    // drift, nor integrate. They reappear exactly where they were stored.
+    var hidden = world._hidden || new Set();
 
     var dragged = world.dragId ? findCard(world, world.dragId) : null;
 
@@ -333,6 +371,7 @@
     var cutoff2 = cfg.repulsionCutoff * cfg.repulsionCutoff;
     for (var a = 0; a < n; a++) {
       for (var b = a + 1; b < n; b++) {
+        if (hidden.has(cards[a].id) || hidden.has(cards[b].id)) continue;
         if (!cards[a].dragging && !cards[b].dragging) continue;
         var dx = cards[b].x - cards[a].x;
         var dy = cards[b].y - cards[a].y;
@@ -361,6 +400,7 @@
       var cDamp = 2 * Math.sqrt(cfg.k);
       for (var p = 0; p < n; p++) {
         var card = cards[p];
+        if (hidden.has(card.id)) { card.vx = 0; card.vy = 0; continue; }
         if (card.dragging) continue; // positioned externally while grabbed
         // Free board + dragging: move only the grabbed branch; leave the rest.
         if (!world.tidy && dragged && !isDescendant(world, card.id, dragged.id)) continue;
@@ -384,7 +424,7 @@
       if (dsp2 > 1) {
         for (var o = 0; o < n; o++) {
           var other = cards[o];
-          if (other.dragging) continue;
+          if (other.dragging || hidden.has(other.id)) continue;
           var ox = other.x - dcard.x, oy = other.y - dcard.y;
           var od = Math.sqrt(ox * ox + oy * oy) || 1e-6;
           if (od > cfg.wakeRadius) continue;
@@ -402,7 +442,7 @@
     //    where the user placed it, so there is no drift and no scatter.
     if (world.drift && world.tidy) {
       for (var g = 0; g < n; g++) {
-        if (cards[g].dragging) continue;
+        if (cards[g].dragging || hidden.has(cards[g].id)) continue;
         if (world.rng() < cfg.driftChance) {
           cards[g].vx += (world.rng() * 2 - 1) * cfg.driftImpulse;
           cards[g].vy += (world.rng() * 2 - 1) * cfg.driftImpulse;
@@ -430,6 +470,7 @@
     var decay = Math.exp(-cfg.globalDamp * dt);
     for (var k = 0; k < n; k++) {
       var q = cards[k];
+      if (hidden.has(q.id)) { q.vx = 0; q.vy = 0; continue; }
       if (q.dragging || q.hover || !q.awake) { q.vx = 0; q.vy = 0; continue; }
       q.vx += q.fx * dt;
       q.vy += q.fy * dt;
@@ -446,6 +487,7 @@
     // 8. dormancy: quiet for sleepSteps in a row and the card stops integrating.
     for (var s = 0; s < n; s++) {
       var sc = cards[s];
+      if (hidden.has(sc.id)) continue;
       if (sc.dragging || sc.hover || !sc.awake) continue;
       var v2 = sc.vx * sc.vx + sc.vy * sc.vy;
       var f2 = sc.fx * sc.fx + sc.fy * sc.fy;
@@ -527,6 +569,13 @@
     removeCard: removeCard,
     findCard: findCard,
     computeTreeLayout: computeTreeLayout,
+    // Public, non-mutating visibility query (used by render + export to skip
+    // cards inside a folded branch).
+    hiddenSet: function (world) {
+      var byId = new Map();
+      world.cards.forEach(function (c) { byId.set(c.id, c); });
+      return computeHidden(world, byId);
+    },
     nearestAnchorRoot: nearestAnchorRoot,
     targetOf: targetOf,
     step: step,
